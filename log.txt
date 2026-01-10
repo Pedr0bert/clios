@@ -1,0 +1,2 @@
+Log do sistema
+Mais uma linha
