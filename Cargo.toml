@@ -1,6 +1,6 @@
 [package]
 name = "clios-shell"
-version = "1.0.0"
+version = "0.7.0"
 edition = "2024"
 description = "A Hybrid Rust + Rhai System Shell for Embedded Linux & Power Users"
 license = "MIT"

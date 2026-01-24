@@ -8,7 +8,7 @@
 ![Rhai](https://img.shields.io/badge/scripting-Rhai-brightgreen.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Tests](https://img.shields.io/badge/tests-45_passing-brightgreen.svg)
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)
 
 ##  Funcionalidades (The 10 Levels)
 
@@ -26,7 +26,7 @@ O desenvolvimento do Clios seguiu um roadmap de 10 níveis de complexidade de si
 - [x] **Context Awareness:** Parser inteligente que respeita aspas em argumentos.
 - [x] ** Proteções Robustas:** Sistema avançado de detecção e prevenção de erros.
 
-##  Proteções e Melhorias (v1.0.0)
+##  Proteções e Melhorias (v0.7.0)
 
 A shell Clios inclui proteções avançadas contra erros comuns:
 

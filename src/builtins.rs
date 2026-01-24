@@ -25,6 +25,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use crate::jobs::{JobList, list_jobs};
+
 // -----------------------------------------------------------------------------
 // BUILTIN EXECUTION
 // -----------------------------------------------------------------------------
@@ -49,7 +51,9 @@ pub fn handle_builtin(
     rhai_engine: &mut Engine,
     rhai_scope: &mut Scope,
     plugin_ast: &mut Option<AST>,
-    load_plugin_fn: impl Fn(&mut Engine, &mut Option<AST>, &str),
+    load_plugin_fn: impl Fn(&mut Engine, &mut Option<AST>, &str) -> Result<(), String>,
+    history_file: &str,
+    jobs_list: &JobList,
 ) -> BuiltinResult {
     if tokens.is_empty() {
         return BuiltinResult::NotBuiltin;
@@ -61,12 +65,14 @@ pub fn handle_builtin(
             BuiltinResult::Handled
         }
         "history" => {
-            handle_history();
+            handle_history(history_file);
             BuiltinResult::Handled
         }
         "source" | "load" => {
             if let Some(path) = tokens.get(1) {
-                load_plugin_fn(rhai_engine, plugin_ast, path);
+                if let Err(e) = load_plugin_fn(rhai_engine, plugin_ast, path) {
+                    eprintln!("{}", e);
+                }
             } else {
                 println!("Uso: source <arquivo.rhai>");
             }
@@ -95,6 +101,10 @@ pub fn handle_builtin(
             handle_fg(tokens);
             BuiltinResult::Handled
         }
+        "jobs" => {
+            list_jobs(jobs_list);
+            BuiltinResult::Handled
+        }
         "export" => {
             handle_export(tokens);
             BuiltinResult::Handled
@@ -116,8 +126,8 @@ pub fn handle_builtin(
             BuiltinResult::Handled
         }
         "version" => {
-            println!("Clios Shell v1.0.0 (Final Release)");
-            println!("Desenvolvido em Rust 🦀");
+            println!("Clios Shell v0.7.0");
+            println!("Desenvolvido em Rust");
             BuiltinResult::Handled
         }
         _ => BuiltinResult::NotBuiltin,
@@ -158,14 +168,22 @@ fn handle_cd(tokens: &[String], previous_dir: &mut Option<PathBuf>) {
 }
 
 /// Handles the `history` command.
-fn handle_history() {
-    if let Ok(file) = File::open("history.txt") {
+fn handle_history(history_file: &str) {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let history_path = std::path::Path::new(&home).join(history_file);
+    
+    if let Ok(file) = File::open(&history_path) {
         let reader = BufReader::new(file);
         for (i, line) in reader.lines().enumerate() {
             if let Ok(l) = line {
-                println!("{:5}  {}", i + 1, l);
+                // Ignora linhas de metadata do rustyline (começam com #)
+                if !l.starts_with('#') {
+                    println!("{:5}  {}", i + 1, l);
+                }
             }
         }
+    } else {
+        println!("Histórico vazio ou arquivo não encontrado: {}", history_path.display());
     }
 }
 

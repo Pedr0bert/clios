@@ -6,7 +6,116 @@
 use nix::sys::signal::{self, SigHandler, Signal};
 use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
 use nix::unistd;
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+// -----------------------------------------------------------------------------
+// JOB TRACKING
+// -----------------------------------------------------------------------------
+
+/// Representa um job em background
+#[derive(Debug, Clone)]
+pub struct BackgroundJob {
+    /// PID do processo
+    pub pid: i32,
+    /// Comando que está sendo executado
+    pub command: String,
+    /// Hora de início
+    pub started: Instant,
+    /// Status atual
+    pub status: JobStatus,
+}
+
+/// Status de um job
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobStatus {
+    Running,
+    Stopped,
+    Done,
+}
+
+/// Lista global de jobs em background
+pub type JobList = Arc<Mutex<HashMap<i32, BackgroundJob>>>;
+
+/// Cria uma nova lista de jobs vazia
+pub fn new_job_list() -> JobList {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+/// Adiciona um job à lista
+#[allow(dead_code)]
+pub fn add_job(jobs: &JobList, pid: i32, command: String) {
+    if let Ok(mut list) = jobs.lock() {
+        list.insert(pid, BackgroundJob {
+            pid,
+            command,
+            started: Instant::now(),
+            status: JobStatus::Running,
+        });
+    }
+}
+
+/// Remove um job da lista
+#[allow(dead_code)]
+pub fn remove_job(jobs: &JobList, pid: i32) {
+    if let Ok(mut list) = jobs.lock() {
+        list.remove(&pid);
+    }
+}
+
+/// Atualiza o status de jobs (verifica se terminaram)
+pub fn update_jobs(jobs: &JobList) {
+    if let Ok(mut list) = jobs.lock() {
+        let pids: Vec<i32> = list.keys().cloned().collect();
+        
+        for pid in pids {
+            match wait::waitpid(unistd::Pid::from_raw(pid), Some(WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _)) => {
+                    if let Some(job) = list.get_mut(&pid) {
+                        job.status = JobStatus::Done;
+                    }
+                }
+                Ok(WaitStatus::Stopped(_, _)) => {
+                    if let Some(job) = list.get_mut(&pid) {
+                        job.status = JobStatus::Stopped;
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // Remove jobs concluídos
+        list.retain(|_, job| job.status != JobStatus::Done);
+    }
+}
+
+/// Lista todos os jobs ativos
+pub fn list_jobs(jobs: &JobList) {
+    update_jobs(jobs);
+    
+    if let Ok(list) = jobs.lock() {
+        if list.is_empty() {
+            println!("Nenhum job em background");
+            return;
+        }
+        
+        println!("Jobs em background:");
+        println!("{:>5}  {:>10}  {}", "PID", "Status", "Comando");
+        println!("{:-<40}", "");
+        
+        for job in list.values() {
+            let status_str = match job.status {
+                JobStatus::Running => "Running",
+                JobStatus::Stopped => "Stopped",
+                JobStatus::Done => "Done",
+            };
+            let elapsed = job.started.elapsed().as_secs();
+            println!("{:>5}  {:>10}  {} ({}s)", job.pid, status_str, job.command, elapsed);
+        }
+    }
+}
 
 // -----------------------------------------------------------------------------
 // JOB CONTROL EXECUTION

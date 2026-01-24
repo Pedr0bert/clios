@@ -1,6 +1,6 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║                     CLIOS SHELL - CONFIGURAÇÃO DE PRODUÇÃO                  ║
-# ║                              ~/.cliosrc v1.0.0                              ║
+# ║                              ~/.cliosrc v0.7.0                              ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ============================================================================
@@ -178,7 +178,7 @@ source ~/.clios_plugins/dev_tools.rhai
 
 # Para ativar, descomente as linhas abaixo:
 # echo ""
-# echo "   Clios Shell v1.0.0 carregado!"
+# echo "   Clios Shell v0.7.0 carregado!"
 # echo "   Comandos: help | sysinfo | gitstat | backup"
 # echo ""
 

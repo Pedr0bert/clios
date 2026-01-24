@@ -1,15 +1,30 @@
-======================================================================================
- CLIOS SHELL - CÓDIGO COMPLETO v1.0.0
- Desenvolvido em Rust
- Todos os módulos compilados em um único arquivo
- Data de geração: $(date +"%Y-%m-%d %H:%M:%S")
-======================================================================================
+================================================================================
+                    CLIOS SHELL - CÓDIGO FONTE COMPLETO
+                              Versão 0.7.0
+================================================================================
+Projeto: Shell híbrida Rust + Rhai para Linux/Unix
+Repositório: https://github.com/pedbelivros/clios
+================================================================================
+
+ESTRUTURA DO PROJETO:
+- src/main.rs         - Ponto de entrada e CLI
+- src/shell.rs        - Core da shell e loop principal
+- src/builtins.rs     - Comandos internos (cd, alias, export, etc.)
+- src/pipeline.rs     - Execução de pipelines e redirecionamentos
+- src/expansion.rs    - Expansões ($VAR, ~, globs, subshells, aliases)
+- src/jobs.rs         - Job control (fg, bg, processos background)
+- src/prompt.rs       - Prompt powerline personalizado
+- src/config.rs       - Carregamento de configurações
+- src/completion.rs   - Autocomplete e syntax highlighting
+- src/rhai_integration.rs - Integração com scripting Rhai
+- src/tests.rs        - Testes unitários
+
+================================================================================
 
 
-// =====================================================================================
-// src/main.rs
-// =====================================================================================
-
+// ============================================================================
+// FILE: src/main.rs
+// ============================================================================
 //! # Clios Shell (Command Line Interface & Operating System Shell)
 //!
 //! Bem-vindo à documentação oficial da **Clios**, uma shell híbrida desenvolvida em Rust.
@@ -292,253 +307,9 @@ fn build_classic_prompt(shell: &CliosShell) -> String {
 }
 
 
-// =====================================================================================
-// src/config.rs
-// =====================================================================================
-
-//! # Configuration Module
-//!
-//! Handles loading and parsing of the `~/.clios.toml` configuration file.
-//! Also defines all configuration structures used throughout the shell.
-
-use serde::Deserialize;
-use std::env;
-use std::path::Path;
-
-// -----------------------------------------------------------------------------
-// PROMPT CONFIGURATION
-// -----------------------------------------------------------------------------
-
-/// Configurações visuais do Prompt de comando.
-///
-/// Esta estrutura mapeia a seção `[prompt]` do arquivo de configuração `.clios.toml`.
-/// Permite que o usuário personalize cores, símbolos e informações exibidas.
-#[derive(Debug, Deserialize, Clone)]
-pub struct ConfigPrompt {
-    /// O símbolo exibido no final do prompt (ex: `>`, `$`, `➜`, ``).
-    /// * Padrão: `>`
-    pub symbol: Option<String>,
-
-    /// A cor do símbolo e do separador.
-    /// * Valores aceitos: "red", "green", "blue", "purple", "cyan", "yellow".
-    /// * Padrão: "blue"
-    pub color: Option<String>,
-
-    /// Cor do caminho (/mnt/c/...)
-    pub path_color: Option<String>,
-
-    /// Cor do símbolo (setinha >)
-    pub symbol_color: Option<String>,
-
-    /// Define se deve mostrar a branch atual do Git.
-    /// * Padrão: `true`
-    pub show_git: Option<bool>,
-}
-
-// -----------------------------------------------------------------------------
-// HISTORY CONFIGURATION
-// -----------------------------------------------------------------------------
-
-/// Configurações do histórico de comandos.
-///
-/// Esta estrutura mapeia a seção `[history]` do arquivo `.clios.toml`.
-#[derive(Debug, Deserialize, Clone)]
-pub struct ConfigHistory {
-    /// Nome do arquivo onde o histórico será salvo na pasta HOME.
-    /// * Padrão: `.clios_history`
-    pub file: Option<String>,
-
-    /// Número máximo de comandos a serem lembrados.
-    /// * Padrão: `1000`
-    pub max_entries: Option<usize>,
-}
-
-// -----------------------------------------------------------------------------
-// SYNTAX HIGHLIGHTING CONFIGURATION
-// -----------------------------------------------------------------------------
-
-/// Configurações de cores para o realce de sintaxe (Syntax Highlighting).
-///
-/// Mapeia a seção `[syntax]` do arquivo `.clios.toml`.
-/// Define as cores usadas enquanto o usuário digita um comando.
-#[derive(Debug, Deserialize, Clone)]
-pub struct ConfigSyntax {
-    /// Cor para comandos válidos (encontrados no sistema ou builtins).
-    /// * Padrão: "green"
-    pub valid_cmd: Option<String>,
-
-    /// Cor para comandos inválidos (não encontrados).
-    /// * Padrão: "red"
-    pub invalid_cmd: Option<String>,
-}
-
-// -----------------------------------------------------------------------------
-// VERSION READING STRUCTURES
-// -----------------------------------------------------------------------------
-
-/// Struct para ler Cargo.toml
-#[derive(Deserialize)]
-pub struct CargoToml {
-    pub package: CargoPackage,
-}
-
-#[derive(Deserialize)]
-pub struct CargoPackage {
-    pub version: String,
-}
-
-/// Struct para ler package.json
-#[derive(Deserialize)]
-pub struct PackageJson {
-    pub version: String,
-}
-
-/// Struct para ler pyproject.toml
-#[derive(Deserialize)]
-pub struct PyProjectToml {
-    pub project: Option<PyProjectSection>,
-    pub tool: Option<PyToolSection>,
-}
-
-#[derive(Deserialize)]
-pub struct PyProjectSection {
-    pub version: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct PyToolSection {
-    pub poetry: Option<PyPoetrySection>,
-}
-
-#[derive(Deserialize)]
-pub struct PyPoetrySection {
-    pub version: Option<String>,
-}
-
-// -----------------------------------------------------------------------------
-// ROOT CONFIGURATION
-// -----------------------------------------------------------------------------
-
-/// A Configuração Raiz (Root) da Clios Shell.
-///
-/// Esta é a estrutura principal que representa o arquivo `~/.clios.toml` inteiro.
-/// O `serde` lê o arquivo e preenche estes campos automaticamente.
-///
-/// # Exemplo de Arquivo `.clios.toml`
-/// ```toml
-/// [prompt]
-/// symbol = "➜"
-/// color = "purple"
-///
-/// [history]
-/// max_entries = 5000
-/// ```
-#[derive(Debug, Deserialize, Clone)]
-pub struct CliosConfig {
-    /// Configurações da seção `[prompt]`.
-    pub prompt: Option<ConfigPrompt>,
-
-    /// Configurações da seção `[history]`.
-    pub history: Option<ConfigHistory>,
-
-    /// Configurações da seção `[syntax]`.
-    pub syntax: Option<ConfigSyntax>,
-
-    /// Tema do prompt (powerline ou classic).
-    pub theme: Option<String>,
-}
-
-impl CliosConfig {
-    /// Retorna a configuração padrão (Default) caso o arquivo não exista.
-    ///
-    /// # Valores Padrão
-    /// * **Prompt:** Símbolo `> `, Cor `blue`, Git `true`.
-    /// * **History:** Arquivo `.clios_history`, 1000 entradas.
-    pub fn default() -> Self {
-        Self {
-            prompt: Some(ConfigPrompt {
-                symbol: Some("> ".to_string()),
-                color: Some("blue".to_string()),
-                show_git: Some(true),
-                path_color: None,
-                symbol_color: None,
-            }),
-            history: Some(ConfigHistory {
-                file: Some(".clios_history".to_string()),
-                max_entries: Some(1000),
-            }),
-            syntax: Some(ConfigSyntax {
-                valid_cmd: Some("green".to_string()),
-                invalid_cmd: Some("red".to_string()),
-            }),
-            theme: Some("powerline".to_string()),
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// LOADING FUNCTIONS
-// -----------------------------------------------------------------------------
-
-/// Carrega a configuração do usuário a partir de um arquivo TOML.
-///
-/// # Estratégia de Carregamento
-/// 1. Busca pela variável de ambiente `$HOME`.
-/// 2. Tenta abrir o arquivo `$HOME/.clios.toml`.
-/// 3. Se o arquivo existir e for válido, retorna a `CliosConfig` preenchida.
-/// 4. Se o arquivo não existir ou tiver erros de sintaxe, retorna `CliosConfig::default()`
-///    e imprime um aviso no stderr (se for erro de sintaxe).
-pub fn load_toml_config() -> CliosConfig {
-    // 1. Constrói o caminho ~/.clios.toml
-    let config_path = env::var("HOME")
-        .map(|p| Path::new(&p).join(".clios.toml"))
-        .unwrap_or_else(|_| Path::new(".clios.toml").to_path_buf());
-
-    // 2. Tenta ler e fazer o parse
-    if config_path.exists()
-        && let Ok(contents) = std::fs::read_to_string(&config_path) {
-            match toml::from_str::<CliosConfig>(&contents) {
-                Ok(cfg) => return cfg, // Sucesso!
-                Err(e) => {
-                    eprintln!(
-                        "\x1b[1;33m[AVISO CONFIG]\x1b[0m Erro no .clios.toml: {}",
-                        e
-                    );
-                    eprintln!("--> Usando configuração padrão.");
-                }
-            }
-        }
-
-    // 3. Fallback para padrão
-    CliosConfig::default()
-}
-
-/// Converte um nome de cor legível (ex: "red") para seu código ANSI correspondente.
-///
-/// Esta função é usada para traduzir as configurações do usuário no arquivo TOML
-/// para os caracteres de escape que o terminal entende.
-///
-/// # Cores Suportadas
-/// * red, green, yellow, blue, purple, cyan, white.
-/// * Qualquer outra string retorna o código de reset/padrão.
-pub fn get_color_ansi(color_name: &str) -> String {
-    match color_name {
-        "red" => "\x1b[31m".to_string(),
-        "green" => "\x1b[32m".to_string(),
-        "yellow" => "\x1b[33m".to_string(),
-        "blue" => "\x1b[34m".to_string(),
-        "purple" => "\x1b[35m".to_string(),
-        "cyan" => "\x1b[36m".to_string(),
-        "white" => "\x1b[37m".to_string(),
-        _ => "\x1b[0m".to_string(), // Default (sem cor)
-    }
-}
-
-
-// =====================================================================================
-// src/shell.rs
-// =====================================================================================
-
+// ============================================================================
+// FILE: src/shell.rs
+// ============================================================================
 //! # Shell Module
 //!
 //! Contains the main CliosShell struct and core shell logic.
@@ -552,10 +323,10 @@ pub fn get_color_ansi(color_name: &str) -> String {
 use crate::builtins::{handle_builtin, BuiltinResult};
 use crate::config::CliosConfig;
 use crate::expansion::{
-    expand_alias_string, expand_globs, expand_subshells, expand_tilde, expand_variables,
-    split_logical_and,
+    expand_alias_string, expand_globs, expand_subshells, expand_tilde, expand_variables_with_state,
+    split_logical_operators, LogicalOp,
 };
-use crate::jobs::execute_job_control;
+use crate::jobs::{execute_job_control, JobList, new_job_list};
 use crate::pipeline::execute_pipeline;
 use crate::rhai_integration::{create_rhai_engine, try_execute_plugin_function};
 
@@ -642,6 +413,9 @@ pub struct CliosShell {
 
     /// AST do script de inicialização (se houver).
     pub plugin_ast: Option<AST>,
+    
+    /// Lista de jobs em background
+    pub jobs: JobList,
 }
 
 impl CliosShell {
@@ -657,15 +431,16 @@ impl CliosShell {
             last_exit_code: 0,
             previous_dir: None,
             config,
+            jobs: new_job_list(),
         }
     }
 
     /// NÍVEL 12: Carregador de Plugins (Compilação Única)
-    pub fn load_plugin(&mut self, path: &str) {
+    /// Retorna Ok(()) em sucesso ou Err(mensagem) em falha
+    pub fn load_plugin(&mut self, path: &str) -> Result<(), String> {
         // Verificar se o arquivo existe
         if !std::path::Path::new(path).exists() {
-            eprintln!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Arquivo não encontrado: {}", path);
-            return;
+            return Err(format!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Arquivo não encontrado: {}", path));
         }
 
         match self.rhai_engine.compile_file(path.into()) {
@@ -675,11 +450,10 @@ impl CliosShell {
                 } else {
                     self.plugin_ast = Some(new_ast);
                 }
-                // Sucesso silencioso - apenas erros são exibidos
+                Ok(())
             }
             Err(e) => {
-                eprintln!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}'", path);
-                eprintln!("  Detalhes: {}", e);
+                Err(format!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}'\n  Detalhes: {}", path, e))
             }
         }
     }
@@ -695,7 +469,9 @@ impl CliosShell {
 
                 if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rhai")
                     && let Some(path_str) = path.to_str() {
-                        self.load_plugin(path_str);
+                        if let Err(e) = self.load_plugin(path_str) {
+                            eprintln!("{}", e);
+                        }
                     }
             }
         }
@@ -732,28 +508,35 @@ impl CliosShell {
     }
 
     /// O Cérebro da Execução: Processa uma linha de entrada bruta.
+    /// Suporta operadores && (AND) e || (OR) com curto-circuito.
     pub fn process_input_line(&mut self, input: &str) {
         let input_expanded = expand_subshells(input);
 
-        let logical_parts = split_logical_and(&input_expanded);
+        let logical_parts = split_logical_operators(&input_expanded);
 
         for part in logical_parts {
-            let expanded_part = expand_alias_string(&part, &self.aliases);
+            let expanded_part = expand_alias_string(&part.command, &self.aliases);
 
-            if expanded_part != part && expanded_part.contains("&&") {
+            // Se o alias expandido contém operadores lógicos, processa recursivamente
+            if expanded_part != part.command && (expanded_part.contains("&&") || expanded_part.contains("||")) {
                 self.process_input_line(&expanded_part);
 
-                if self.last_exit_code != 0 {
-                    break;
+                // Aplica curto-circuito baseado no operador
+                match part.next_op {
+                    Some(LogicalOp::And) if self.last_exit_code != 0 => break,
+                    Some(LogicalOp::Or) if self.last_exit_code == 0 => break,
+                    _ => continue,
                 }
-                continue;
             }
 
             let exit_code = self.execute_single_command_block(&expanded_part);
             self.last_exit_code = exit_code;
 
-            if exit_code != 0 {
-                break;
+            // Curto-circuito baseado no operador
+            match part.next_op {
+                Some(LogicalOp::And) if exit_code != 0 => break,  // && falha: para
+                Some(LogicalOp::Or) if exit_code == 0 => break,   // || sucesso: para
+                _ => {}  // Continua para o próximo comando
             }
         }
     }
@@ -797,7 +580,7 @@ impl CliosShell {
 
             // Expansões finais
             if tokens.first().map(|s| s.as_str()) != Some("rhai") {
-                tokens = expand_variables(tokens);
+                tokens = expand_variables_with_state(tokens, self.last_exit_code, std::process::id());
                 tokens = expand_tilde(tokens);
                 tokens = expand_globs(tokens);
             }
@@ -822,6 +605,13 @@ impl CliosShell {
                 }
 
             // 2. Tenta Builtin
+            // Obtém arquivo de histórico da config
+            let history_file = self.config.history
+                .as_ref()
+                .and_then(|h| h.file.as_deref())
+                .unwrap_or(".clios_history");
+            
+            let jobs_ref = self.jobs.clone();
             let result = handle_builtin(
                 &tokens,
                 &mut self.aliases,
@@ -829,7 +619,7 @@ impl CliosShell {
                 &mut self.rhai_engine,
                 &mut self.rhai_scope,
                 &mut self.plugin_ast,
-                |engine, ast, path| {
+                |engine, ast, path| -> Result<(), String> {
                     match engine.compile_file(path.into()) {
                         Ok(new_ast) => {
                             if let Some(existing_ast) = ast {
@@ -837,10 +627,13 @@ impl CliosShell {
                             } else {
                                 *ast = Some(new_ast);
                             }
+                            Ok(())
                         }
-                        Err(e) => eprintln!("Erro ao compilar plugin: {}", e),
+                        Err(e) => Err(format!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}': {}", path, e)),
                     }
                 },
+                history_file,
+                &jobs_ref,
             );
 
             match result {
@@ -884,7 +677,7 @@ impl CliosShell {
                     continue;
                 }
 
-                let tokens = expand_variables(tokens);
+                let tokens = expand_variables_with_state(tokens, self.last_exit_code, std::process::id());
                 let tokens = expand_tilde(tokens);
                 let tokens = expand_globs(tokens);
 
@@ -901,10 +694,9 @@ impl CliosShell {
 }
 
 
-// =====================================================================================
-// src/builtins.rs
-// =====================================================================================
-
+// ============================================================================
+// FILE: src/builtins.rs
+// ============================================================================
 //! # Builtins Module
 //!
 //! Contains all built-in shell commands that are executed internally
@@ -932,6 +724,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use crate::jobs::{JobList, list_jobs};
+
 // -----------------------------------------------------------------------------
 // BUILTIN EXECUTION
 // -----------------------------------------------------------------------------
@@ -956,7 +750,9 @@ pub fn handle_builtin(
     rhai_engine: &mut Engine,
     rhai_scope: &mut Scope,
     plugin_ast: &mut Option<AST>,
-    load_plugin_fn: impl Fn(&mut Engine, &mut Option<AST>, &str),
+    load_plugin_fn: impl Fn(&mut Engine, &mut Option<AST>, &str) -> Result<(), String>,
+    history_file: &str,
+    jobs_list: &JobList,
 ) -> BuiltinResult {
     if tokens.is_empty() {
         return BuiltinResult::NotBuiltin;
@@ -968,12 +764,14 @@ pub fn handle_builtin(
             BuiltinResult::Handled
         }
         "history" => {
-            handle_history();
+            handle_history(history_file);
             BuiltinResult::Handled
         }
         "source" | "load" => {
             if let Some(path) = tokens.get(1) {
-                load_plugin_fn(rhai_engine, plugin_ast, path);
+                if let Err(e) = load_plugin_fn(rhai_engine, plugin_ast, path) {
+                    eprintln!("{}", e);
+                }
             } else {
                 println!("Uso: source <arquivo.rhai>");
             }
@@ -1002,6 +800,10 @@ pub fn handle_builtin(
             handle_fg(tokens);
             BuiltinResult::Handled
         }
+        "jobs" => {
+            list_jobs(jobs_list);
+            BuiltinResult::Handled
+        }
         "export" => {
             handle_export(tokens);
             BuiltinResult::Handled
@@ -1023,8 +825,8 @@ pub fn handle_builtin(
             BuiltinResult::Handled
         }
         "version" => {
-            println!("Clios Shell v1.0.0 (Final Release)");
-            println!("Desenvolvido em Rust 🦀");
+            println!("Clios Shell v0.7.0");
+            println!("Desenvolvido em Rust");
             BuiltinResult::Handled
         }
         _ => BuiltinResult::NotBuiltin,
@@ -1065,14 +867,22 @@ fn handle_cd(tokens: &[String], previous_dir: &mut Option<PathBuf>) {
 }
 
 /// Handles the `history` command.
-fn handle_history() {
-    if let Ok(file) = File::open("history.txt") {
+fn handle_history(history_file: &str) {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let history_path = std::path::Path::new(&home).join(history_file);
+    
+    if let Ok(file) = File::open(&history_path) {
         let reader = BufReader::new(file);
         for (i, line) in reader.lines().enumerate() {
             if let Ok(l) = line {
-                println!("{:5}  {}", i + 1, l);
+                // Ignora linhas de metadata do rustyline (começam com #)
+                if !l.starts_with('#') {
+                    println!("{:5}  {}", i + 1, l);
+                }
             }
         }
+    } else {
+        println!("Histórico vazio ou arquivo não encontrado: {}", history_path.display());
     }
 }
 
@@ -1361,10 +1171,265 @@ fn handle_help() {
 }
 
 
-// =====================================================================================
-// src/expansion.rs
-// =====================================================================================
+// ============================================================================
+// FILE: src/pipeline.rs
+// ============================================================================
+//! # Pipeline Module
+//!
+//! Handles pipeline execution, I/O redirection, and process management.
+//!
+//! ## Funcionalidades
+//! - Execução de pipelines de comandos (`cmd1 | cmd2 | cmd3`)
+//! - Redirecionamento de I/O (`>`, `>>`, `2>`, `2>>`)
+//! - Gerenciamento de processos filhos
 
+use std::fs::{File, OpenOptions};
+use std::process::{Child, Command, Stdio};
+
+// -----------------------------------------------------------------------------
+// CONSTANTES
+// -----------------------------------------------------------------------------
+
+/// Código de saída padrão POSIX para "comando não encontrado"
+const EXIT_COMMAND_NOT_FOUND: i32 = 127;
+
+/// Código de saída para erros genéricos
+const EXIT_ERROR: i32 = 1;
+
+// -----------------------------------------------------------------------------
+// I/O REDIRECTION PARSING
+// -----------------------------------------------------------------------------
+
+/// Analisa e processa operadores de redirecionamento de I/O (Nível 9).
+///
+/// Esta função percorre a lista de tokens procurando por operadores especiais
+/// de redirecionamento. Quando encontra, ela abre o arquivo correspondente
+/// e o remove da lista de argumentos do comando.
+///
+/// # Operadores Suportados
+/// * `<`   : Redireciona **STDIN** (Lê do arquivo).
+/// * `>`   : Redireciona **STDOUT** (Sobrescreve o arquivo).
+/// * `>>`  : Redireciona **STDOUT** (Adiciona ao final do arquivo - Append).
+/// * `2>`  : Redireciona **STDERR** (Sobrescreve o arquivo).
+/// * `2>>` : Redireciona **STDERR** (Adiciona ao final do arquivo - Append).
+///
+/// # Retorno
+/// Retorna uma tupla `(Vec<String>, Option<File>, Option<File>, Option<File>)`:
+/// 1. **Argumentos Limpos:** O comando sem os símbolos de redirecionamento.
+/// 2. **Arquivo Entrada:** O arquivo aberto para onde vem o stdin (se houver).
+/// 3. **Arquivo Saída:** O arquivo aberto para onde vai o stdout (se houver).
+/// 4. **Arquivo Erro:** O arquivo aberto para onde vai o stderr (se houver).
+pub fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Option<File>, Option<File>) {
+    let mut clean = Vec::new();
+    let mut stdin_file = None;
+    let mut stdout_file = None;
+    let mut stderr_file = None;
+
+    let mut iter = tokens.iter().peekable();
+
+    while let Some(t) = iter.next() {
+        match t.as_str() {
+            // Entrada Padrão (Read)
+            "<" => {
+                if let Some(f) = iter.next() {
+                    match File::open(f) {
+                        Ok(o) => stdin_file = Some(o),
+                        Err(e) => {
+                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
+                        }
+                    }
+                } else {
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '<' requer um arquivo");
+                }
+            }
+            // Saída Padrão (Overwrite)
+            ">" => {
+                if let Some(f) = iter.next() {
+                    match OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(f)
+                    {
+                        Ok(o) => stdout_file = Some(o),
+                        Err(e) => {
+                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
+                        }
+                    }
+                } else {
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '>' requer um arquivo");
+                }
+            }
+            // Saída Padrão (Append)
+            ">>" => {
+                if let Some(f) = iter.next() {
+                    match OpenOptions::new()
+                        
+                        .create(true)
+                        .append(true)
+                        .open(f)
+                    {
+                        Ok(o) => stdout_file = Some(o),
+                        Err(e) => {
+                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
+                        }
+                    }
+                } else {
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '>>' requer um arquivo");
+                }
+            }
+            // Saída de Erro (Overwrite)
+            "2>" => {
+                if let Some(f) = iter.next() {
+                    match OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(f)
+                    {
+                        Ok(o) => stderr_file = Some(o),
+                        Err(e) => {
+                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
+                        }
+                    }
+                } else {
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '2>' requer um arquivo");
+                }
+            }
+            // Saída de Erro (Append)
+            "2>>" => {
+                if let Some(f) = iter.next() {
+                    match OpenOptions::new()
+                        
+                        .create(true)
+                        .append(true)
+                        .open(f)
+                    {
+                        Ok(o) => stderr_file = Some(o),
+                        Err(e) => {
+                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
+                        }
+                    }
+                } else {
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '2>>' requer um arquivo");
+                }
+            }
+            // Token normal
+            _ => clean.push(t.clone()),
+        }
+    }
+    (clean, stdin_file, stdout_file, stderr_file)
+}
+
+// -----------------------------------------------------------------------------
+// PIPELINE EXECUTION
+// -----------------------------------------------------------------------------
+
+/// Executa uma "Pipeline" de comandos (ex: `ls | grep txt | wc -l`).
+///
+/// Esta é a função que realmente faz os programas rodarem. Ela gerencia:
+/// 1. **Pipes:** Conecta a saída de um comando na entrada do próximo.
+/// 2. **Redirecionamento:** Conecta arquivos (`>`, `2>`) se necessário.
+/// 3. **Exit Codes:** Captura se o comando deu certo ou errado.
+///
+/// # Como funciona (The Daisy Chain)
+/// Em um pipe `A | B | C`:
+/// * **A**: Stdin = Teclado, Stdout = Pipe(A->B)
+/// * **B**: Stdin = Pipe(A->B), Stdout = Pipe(B->C)
+/// * **C**: Stdin = Pipe(B->C), Stdout = Tela
+pub fn execute_pipeline(commands: Vec<Vec<String>>) -> i32 {
+    // Validação: pipeline vazio
+    if commands.is_empty() {
+        return 0;
+    }
+
+    // Validação: todos os comandos estão vazios
+    if commands.iter().all(|cmd| cmd.is_empty()) {
+        eprintln!("\x1b[1;33m[AVISO]\x1b[0m Pipeline vazio detectado");
+        return 0;
+    }
+
+    let mut prev_cmd: Option<Child> = None;
+    let mut final_exit_code = 0;
+
+    for (i, tokens) in commands.iter().enumerate() {
+        if tokens.is_empty() {
+            eprintln!("\x1b[1;33m[AVISO]\x1b[0m Comando vazio no pipeline (posição {})", i + 1);
+            continue;
+        }
+
+        // 1. Separa o comando dos redirecionamentos de arquivo
+        let (mut args, infile, outfile, errfile) = parse_redirection(tokens);
+
+        if args.is_empty() {
+            continue;
+        }
+
+        let cmd = args.remove(0);
+
+        // 2. Configuração do STDIN
+        let stdin = if let Some(f) = infile {
+            // Redirecionamento de entrada tem prioridade
+            Stdio::from(f)
+        } else if let Some(mut child) = prev_cmd {
+            Stdio::from(child.stdout.take().unwrap())
+        } else {
+            Stdio::inherit()
+        };
+
+        // 3. Configuração do STDOUT
+        let stdout = if let Some(f) = outfile {
+            Stdio::from(f)
+        } else if i < commands.len() - 1 {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        };
+
+        // 4. Configuração do STDERR
+        let stderr = if let Some(f) = errfile {
+            Stdio::from(f)
+        } else {
+            Stdio::inherit()
+        };
+
+        // 5. Executa (Spawn)
+        match Command::new(&cmd)
+            .args(&args)
+            .stdin(stdin)
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()
+        {
+            Ok(child) => prev_cmd = Some(child),
+            Err(e) => {
+                // Mensagem de erro mais descritiva baseada no tipo de erro
+                let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
+                    format!("comando não encontrado: '{}'", cmd)
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    format!("permissão negada: '{}'", cmd)
+                } else {
+                    format!("erro ao executar '{}': {}", cmd, e)
+                };
+                eprintln!("\x1b[1;31m[ERRO]\x1b[0m {}", error_msg);
+                return EXIT_COMMAND_NOT_FOUND;
+            }
+        }
+    }
+
+    // 6. Espera Final
+    if let Some(mut final_child) = prev_cmd
+        && let Ok(status) = final_child.wait() {
+            final_exit_code = status.code().unwrap_or(EXIT_ERROR);
+        }
+
+    final_exit_code
+}
+
+
+// ============================================================================
+// FILE: src/expansion.rs
+// ============================================================================
 //! # Expansion Module
 //!
 //! Handles all types of shell expansions:
@@ -1388,10 +1453,20 @@ use std::process::Command;
 /// Varre cada token procurando por padrões `$VAR` ou `${VAR}` e substitui
 /// pelo valor real do sistema operacional. Funciona inclusive no meio de strings.
 ///
+/// Também suporta variáveis especiais:
+/// - `$?` - Código de saída do último comando
+/// - `$$` - PID da shell atual
+///
 /// # Exemplo
 /// * Entrada: `echo Backup_$USER.tar.gz`
 /// * Saída: `echo Backup_pedro.tar.gz`
+#[allow(dead_code)]
 pub fn expand_variables(tokens: Vec<String>) -> Vec<String> {
+    expand_variables_with_state(tokens, 0, std::process::id())
+}
+
+/// Versão com estado para suportar $? e $$
+pub fn expand_variables_with_state(tokens: Vec<String>, last_exit_code: i32, shell_pid: u32) -> Vec<String> {
     tokens
         .into_iter()
         .map(|token| {
@@ -1405,7 +1480,24 @@ pub fn expand_variables(tokens: Vec<String>) -> Vec<String> {
 
             while let Some(c) = chars.next() {
                 if c == '$' {
-                    // Início de uma variável.
+                    // Variáveis especiais de um único caractere
+                    if let Some(&next_c) = chars.peek() {
+                        match next_c {
+                            '?' => {
+                                chars.next(); // Consome '?'
+                                output.push_str(&last_exit_code.to_string());
+                                continue;
+                            }
+                            '$' => {
+                                chars.next(); // Consome '$'
+                                output.push_str(&shell_pid.to_string());
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    
+                    // Início de uma variável normal
                     let mut var_name = String::new();
                     let mut is_bracketed = false;
 
@@ -1669,7 +1761,7 @@ fn expand_alias_string_with_depth(input: &str, aliases: &HashMap<String, String>
             .unwrap_or("");
         
         if expanded_first_word == first_word {
-            eprintln!("\x1b[1;33m[AVISO]\x1b[0m Alias '{}' se refere a si mesmo, usando comando original", first_word);
+            //eprintln!("\x1b[1;33m[AVISO]\x1b[0m Alias '{}' se refere a si mesmo, usando comando original", first_word);
             return input.to_string();
         }
         
@@ -1681,15 +1773,31 @@ fn expand_alias_string_with_depth(input: &str, aliases: &HashMap<String, String>
 }
 
 // -----------------------------------------------------------------------------
-// LOGICAL AND PARSER
+// LOGICAL OPERATORS PARSER
 // -----------------------------------------------------------------------------
 
-/// Parser Lógico de `&&` com Contexto (Nível 10).
+/// Tipo de operador lógico encontrado
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOp {
+    And,  // &&
+    Or,   // ||
+}
+
+/// Uma parte do comando com o operador que a segue
+#[derive(Debug, Clone)]
+pub struct LogicalPart {
+    pub command: String,
+    pub next_op: Option<LogicalOp>,
+}
+
+/// Parser Lógico de `&&` e `||` com Contexto (Nível 10).
 ///
 /// Esta função resolve o bug onde `echo "a && b"` era dividido incorretamente.
 /// Ela percorre a string caractere por caractere mantendo um **Estado Interno**
 /// para saber se está dentro de aspas ou não.
-pub fn split_logical_and(input: &str) -> Vec<String> {
+///
+/// Retorna uma lista de partes com seus operadores, permitindo curto-circuito.
+pub fn split_logical_operators(input: &str) -> Vec<LogicalPart> {
     let mut parts = Vec::new();
     let mut current_part = String::new();
 
@@ -1716,10 +1824,28 @@ pub fn split_logical_and(input: &str) -> Vec<String> {
                 if !in_single_quote && !in_double_quote
                     && let Some(&'&') = chars.peek() {
                         if !current_part.trim().is_empty() {
-                            parts.push(current_part.clone());
+                            parts.push(LogicalPart {
+                                command: current_part.clone(),
+                                next_op: Some(LogicalOp::And),
+                            });
                         }
                         current_part.clear();
                         chars.next(); // Consome o segundo '&'
+                        continue;
+                    }
+                current_part.push(c);
+            }
+            '|' => {
+                if !in_single_quote && !in_double_quote
+                    && let Some(&'|') = chars.peek() {
+                        if !current_part.trim().is_empty() {
+                            parts.push(LogicalPart {
+                                command: current_part.clone(),
+                                next_op: Some(LogicalOp::Or),
+                            });
+                        }
+                        current_part.clear();
+                        chars.next(); // Consome o segundo '|'
                         continue;
                     }
                 current_part.push(c);
@@ -1729,254 +1855,222 @@ pub fn split_logical_and(input: &str) -> Vec<String> {
     }
 
     if !current_part.trim().is_empty() {
-        parts.push(current_part);
+        parts.push(LogicalPart {
+            command: current_part,
+            next_op: None,
+        });
     }
     parts
 }
 
-
-// =====================================================================================
-// src/pipeline.rs
-// =====================================================================================
-
-//! # Pipeline Module
-//!
-//! Handles pipeline execution, I/O redirection, and process management.
-//!
-//! ## Funcionalidades
-//! - Execução de pipelines de comandos (`cmd1 | cmd2 | cmd3`)
-//! - Redirecionamento de I/O (`>`, `>>`, `2>`, `2>>`)
-//! - Gerenciamento de processos filhos
-
-use std::fs::{File, OpenOptions};
-use std::process::{Child, Command, Stdio};
-
-// -----------------------------------------------------------------------------
-// CONSTANTES
-// -----------------------------------------------------------------------------
-
-/// Código de saída padrão POSIX para "comando não encontrado"
-const EXIT_COMMAND_NOT_FOUND: i32 = 127;
-
-/// Código de saída para erros genéricos
-const EXIT_ERROR: i32 = 1;
-
-// -----------------------------------------------------------------------------
-// I/O REDIRECTION PARSING
-// -----------------------------------------------------------------------------
-
-/// Analisa e processa operadores de redirecionamento de I/O (Nível 9).
-///
-/// Esta função percorre a lista de tokens procurando por operadores especiais
-/// de redirecionamento. Quando encontra, ela abre o arquivo correspondente
-/// e o remove da lista de argumentos do comando.
-///
-/// # Operadores Suportados
-/// * `>`   : Redireciona **STDOUT** (Sobrescreve o arquivo).
-/// * `>>`  : Redireciona **STDOUT** (Adiciona ao final do arquivo - Append).
-/// * `2>`  : Redireciona **STDERR** (Sobrescreve o arquivo).
-/// * `2>>` : Redireciona **STDERR** (Adiciona ao final do arquivo - Append).
-///
-/// # Retorno
-/// Retorna uma tupla `(Vec<String>, Option<File>, Option<File>)`:
-/// 1. **Argumentos Limpos:** O comando sem os símbolos de redirecionamento.
-/// 2. **Arquivo Saída:** O arquivo aberto para onde vai o stdout (se houver).
-/// 3. **Arquivo Erro:** O arquivo aberto para onde vai o stderr (se houver).
-pub fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Option<File>) {
-    let mut clean = Vec::new();
-    let mut stdout_file = None;
-    let mut stderr_file = None;
-
-    let mut iter = tokens.iter().peekable();
-
-    while let Some(t) = iter.next() {
-        match t.as_str() {
-            // Saída Padrão (Overwrite)
-            ">" => {
-                if let Some(f) = iter.next() {
-                    match OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(f)
-                    {
-                        Ok(o) => stdout_file = Some(o),
-                        Err(e) => {
-                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
-                        }
-                    }
-                } else {
-                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '>' requer um arquivo");
-                }
-            }
-            // Saída Padrão (Append)
-            ">>" => {
-                if let Some(f) = iter.next() {
-                    match OpenOptions::new()
-                        
-                        .create(true)
-                        .append(true)
-                        .open(f)
-                    {
-                        Ok(o) => stdout_file = Some(o),
-                        Err(e) => {
-                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
-                        }
-                    }
-                } else {
-                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '>>' requer um arquivo");
-                }
-            }
-            // Saída de Erro (Overwrite)
-            "2>" => {
-                if let Some(f) = iter.next() {
-                    match OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(f)
-                    {
-                        Ok(o) => stderr_file = Some(o),
-                        Err(e) => {
-                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
-                        }
-                    }
-                } else {
-                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '2>' requer um arquivo");
-                }
-            }
-            // Saída de Erro (Append)
-            "2>>" => {
-                if let Some(f) = iter.next() {
-                    match OpenOptions::new()
-                        
-                        .create(true)
-                        .append(true)
-                        .open(f)
-                    {
-                        Ok(o) => stderr_file = Some(o),
-                        Err(e) => {
-                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
-                        }
-                    }
-                } else {
-                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '2>>' requer um arquivo");
-                }
-            }
-            // Token normal
-            _ => clean.push(t.clone()),
-        }
-    }
-    (clean, stdout_file, stderr_file)
-}
-
-// -----------------------------------------------------------------------------
-// PIPELINE EXECUTION
-// -----------------------------------------------------------------------------
-
-/// Executa uma "Pipeline" de comandos (ex: `ls | grep txt | wc -l`).
-///
-/// Esta é a função que realmente faz os programas rodarem. Ela gerencia:
-/// 1. **Pipes:** Conecta a saída de um comando na entrada do próximo.
-/// 2. **Redirecionamento:** Conecta arquivos (`>`, `2>`) se necessário.
-/// 3. **Exit Codes:** Captura se o comando deu certo ou errado.
-///
-/// # Como funciona (The Daisy Chain)
-/// Em um pipe `A | B | C`:
-/// * **A**: Stdin = Teclado, Stdout = Pipe(A->B)
-/// * **B**: Stdin = Pipe(A->B), Stdout = Pipe(B->C)
-/// * **C**: Stdin = Pipe(B->C), Stdout = Tela
-pub fn execute_pipeline(commands: Vec<Vec<String>>) -> i32 {
-    // Validação: pipeline vazio
-    if commands.is_empty() {
-        return 0;
-    }
-
-    // Validação: todos os comandos estão vazios
-    if commands.iter().all(|cmd| cmd.is_empty()) {
-        eprintln!("\x1b[1;33m[AVISO]\x1b[0m Pipeline vazio detectado");
-        return 0;
-    }
-
-    let mut prev_cmd: Option<Child> = None;
-    let mut final_exit_code = 0;
-
-    for (i, tokens) in commands.iter().enumerate() {
-        if tokens.is_empty() {
-            eprintln!("\x1b[1;33m[AVISO]\x1b[0m Comando vazio no pipeline (posição {})", i + 1);
-            continue;
-        }
-
-        // 1. Separa o comando dos redirecionamentos de arquivo
-        let (mut args, outfile, errfile) = parse_redirection(tokens);
-
-        if args.is_empty() {
-            continue;
-        }
-
-        let cmd = args.remove(0);
-
-        // 2. Configuração do STDIN
-        let stdin = if let Some(mut child) = prev_cmd {
-            Stdio::from(child.stdout.take().unwrap())
-        } else {
-            Stdio::inherit()
-        };
-
-        // 3. Configuração do STDOUT
-        let stdout = if let Some(f) = outfile {
-            Stdio::from(f)
-        } else if i < commands.len() - 1 {
-            Stdio::piped()
-        } else {
-            Stdio::inherit()
-        };
-
-        // 4. Configuração do STDERR
-        let stderr = if let Some(f) = errfile {
-            Stdio::from(f)
-        } else {
-            Stdio::inherit()
-        };
-
-        // 5. Executa (Spawn)
-        match Command::new(&cmd)
-            .args(&args)
-            .stdin(stdin)
-            .stdout(stdout)
-            .stderr(stderr)
-            .spawn()
-        {
-            Ok(child) => prev_cmd = Some(child),
-            Err(e) => {
-                // Mensagem de erro mais descritiva baseada no tipo de erro
-                let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
-                    format!("comando não encontrado: '{}'", cmd)
-                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    format!("permissão negada: '{}'", cmd)
-                } else {
-                    format!("erro ao executar '{}': {}", cmd, e)
-                };
-                eprintln!("\x1b[1;31m[ERRO]\x1b[0m {}", error_msg);
-                return EXIT_COMMAND_NOT_FOUND;
-            }
-        }
-    }
-
-    // 6. Espera Final
-    if let Some(mut final_child) = prev_cmd
-        && let Ok(status) = final_child.wait() {
-            final_exit_code = status.code().unwrap_or(EXIT_ERROR);
-        }
-
-    final_exit_code
+/// Mantém compatibilidade com código existente - retorna apenas Vec<String>
+#[allow(dead_code)]
+pub fn split_logical_and(input: &str) -> Vec<String> {
+    split_logical_operators(input)
+        .into_iter()
+        .map(|p| p.command)
+        .collect()
 }
 
 
-// =====================================================================================
-// src/prompt.rs
-// =====================================================================================
+// ============================================================================
+// FILE: src/jobs.rs
+// ============================================================================
+//! # Jobs Module
+//!
+//! Handles job control with low-level Unix process management.
+//! Uses `nix` crate for fork/exec and signal handling.
 
+use nix::sys::signal::{self, SigHandler, Signal};
+use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
+use nix::unistd;
+use std::collections::HashMap;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+// -----------------------------------------------------------------------------
+// JOB TRACKING
+// -----------------------------------------------------------------------------
+
+/// Representa um job em background
+#[derive(Debug, Clone)]
+pub struct BackgroundJob {
+    /// PID do processo
+    pub pid: i32,
+    /// Comando que está sendo executado
+    pub command: String,
+    /// Hora de início
+    pub started: Instant,
+    /// Status atual
+    pub status: JobStatus,
+}
+
+/// Status de um job
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobStatus {
+    Running,
+    Stopped,
+    Done,
+}
+
+/// Lista global de jobs em background
+pub type JobList = Arc<Mutex<HashMap<i32, BackgroundJob>>>;
+
+/// Cria uma nova lista de jobs vazia
+pub fn new_job_list() -> JobList {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+/// Adiciona um job à lista
+#[allow(dead_code)]
+pub fn add_job(jobs: &JobList, pid: i32, command: String) {
+    if let Ok(mut list) = jobs.lock() {
+        list.insert(pid, BackgroundJob {
+            pid,
+            command,
+            started: Instant::now(),
+            status: JobStatus::Running,
+        });
+    }
+}
+
+/// Remove um job da lista
+#[allow(dead_code)]
+pub fn remove_job(jobs: &JobList, pid: i32) {
+    if let Ok(mut list) = jobs.lock() {
+        list.remove(&pid);
+    }
+}
+
+/// Atualiza o status de jobs (verifica se terminaram)
+pub fn update_jobs(jobs: &JobList) {
+    if let Ok(mut list) = jobs.lock() {
+        let pids: Vec<i32> = list.keys().cloned().collect();
+        
+        for pid in pids {
+            match wait::waitpid(unistd::Pid::from_raw(pid), Some(WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _)) => {
+                    if let Some(job) = list.get_mut(&pid) {
+                        job.status = JobStatus::Done;
+                    }
+                }
+                Ok(WaitStatus::Stopped(_, _)) => {
+                    if let Some(job) = list.get_mut(&pid) {
+                        job.status = JobStatus::Stopped;
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // Remove jobs concluídos
+        list.retain(|_, job| job.status != JobStatus::Done);
+    }
+}
+
+/// Lista todos os jobs ativos
+pub fn list_jobs(jobs: &JobList) {
+    update_jobs(jobs);
+    
+    if let Ok(list) = jobs.lock() {
+        if list.is_empty() {
+            println!("Nenhum job em background");
+            return;
+        }
+        
+        println!("Jobs em background:");
+        println!("{:>5}  {:>10}  {}", "PID", "Status", "Comando");
+        println!("{:-<40}", "");
+        
+        for job in list.values() {
+            let status_str = match job.status {
+                JobStatus::Running => "Running",
+                JobStatus::Stopped => "Stopped",
+                JobStatus::Done => "Done",
+            };
+            let elapsed = job.started.elapsed().as_secs();
+            println!("{:>5}  {:>10}  {} ({}s)", job.pid, status_str, job.command, elapsed);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JOB CONTROL EXECUTION
+// -----------------------------------------------------------------------------
+
+/// Execução de baixo nível com controle total de Processos (Job Control - Nível 5).
+///
+/// Diferente do `execute_pipeline` (que usa a std lib), esta função usa `nix` para
+/// chamar `fork` e `exec` manualmente. Isso é necessário para manipular
+/// **Process Groups** e definir quem é o "dono" do terminal.
+///
+/// # A Dança do Terminal (Terminal Handoff)
+/// Para que o `Ctrl+C` vá para o processo certo, precisamos transferir a posse
+/// do terminal (STDIN) da Shell para o Processo Filho.
+///
+/// 1. **Shell:** Ignora `SIGTTOU` (para não ser suspensa ao mexer no terminal).
+/// 2. **Fork:** Cria uma cópia do processo.
+/// 3. **Pai & Filho:** Ambos tentam setar o `setpgid` (para evitar race conditions).
+/// 4. **Pai:** Dá o terminal pro filho (`tcsetpgrp`) e espera (`waitpid`).
+/// 5. **Pai:** Quando o filho morre/para, pega o terminal de volta.
+pub fn execute_job_control(tokens: Vec<String>, background: bool) {
+    // Segurança: Ignorar SIGTTOU na shell
+    unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigIgn) }.unwrap();
+
+    match unsafe { unistd::fork() } {
+        Ok(unistd::ForkResult::Parent { child, .. }) => {
+            // --- CÓDIGO DO PAI (SHELL) ---
+            let pgid = child;
+
+            let _ = unistd::setpgid(child, pgid);
+
+            if !background {
+                let _ = unistd::tcsetpgrp(std::io::stdin(), pgid);
+
+                match wait::waitpid(child, Some(WaitPidFlag::WUNTRACED)) {
+                    Ok(WaitStatus::Stopped(_, _sig)) => {
+                        println!("\n[Job {}] Pausado (Ctrl+Z)", child);
+                    }
+                    Ok(WaitStatus::Signaled(_, sig, _)) => {
+                        println!("\n[Job {}] Morto pelo sinal: {:?}", child, sig);
+                    }
+                    _ => {}
+                }
+
+                let shell_pgid = unistd::getpid();
+                let _ = unistd::tcsetpgrp(std::io::stdin(), shell_pgid);
+            } else {
+                println!("[Background Job {}]", child);
+            }
+        }
+        Ok(unistd::ForkResult::Child) => {
+            // --- CÓDIGO DO FILHO (COMANDO) ---
+            let pid = unistd::getpid();
+            let _ = unistd::setpgid(pid, pid);
+
+            if !background {
+                let _ = unistd::tcsetpgrp(std::io::stdin(), pid);
+            }
+
+            unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigDfl) }.unwrap();
+            unsafe { signal::signal(Signal::SIGINT, SigHandler::SigDfl) }.unwrap();
+
+            use std::os::unix::process::CommandExt;
+
+            let err = Command::new(&tokens[0]).args(&tokens[1..]).exec();
+
+            eprintln!("Erro ao executar '{}': {}", tokens[0], err);
+            std::process::exit(1);
+        }
+        Err(_) => println!("Fork falhou - Sistema sem recursos"),
+    }
+}
+
+
+// ============================================================================
+// FILE: src/prompt.rs
+// ============================================================================
 //! # Prompt Module
 //!
 //! Handles prompt building, including the Powerline theme and Git branch detection.
@@ -2211,97 +2305,487 @@ pub fn get_powerline_segments(_config: &CliosConfig) -> Vec<PowerlineSegment> {
 }
 
 
-// =====================================================================================
-// src/jobs.rs
-// =====================================================================================
-
-//! # Jobs Module
+// ============================================================================
+// FILE: src/config.rs
+// ============================================================================
+//! # Configuration Module
 //!
-//! Handles job control with low-level Unix process management.
-//! Uses `nix` crate for fork/exec and signal handling.
+//! Handles loading and parsing of the `~/.clios.toml` configuration file.
+//! Also defines all configuration structures used throughout the shell.
 
-use nix::sys::signal::{self, SigHandler, Signal};
-use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
-use nix::unistd;
-use std::process::Command;
+use serde::Deserialize;
+use std::env;
+use std::path::Path;
 
 // -----------------------------------------------------------------------------
-// JOB CONTROL EXECUTION
+// PROMPT CONFIGURATION
 // -----------------------------------------------------------------------------
 
-/// Execução de baixo nível com controle total de Processos (Job Control - Nível 5).
+/// Configurações visuais do Prompt de comando.
 ///
-/// Diferente do `execute_pipeline` (que usa a std lib), esta função usa `nix` para
-/// chamar `fork` e `exec` manualmente. Isso é necessário para manipular
-/// **Process Groups** e definir quem é o "dono" do terminal.
+/// Esta estrutura mapeia a seção `[prompt]` do arquivo de configuração `.clios.toml`.
+/// Permite que o usuário personalize cores, símbolos e informações exibidas.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConfigPrompt {
+    /// O símbolo exibido no final do prompt (ex: `>`, `$`, `➜`, ``).
+    /// * Padrão: `>`
+    pub symbol: Option<String>,
+
+    /// A cor do símbolo e do separador.
+    /// * Valores aceitos: "red", "green", "blue", "purple", "cyan", "yellow".
+    /// * Padrão: "blue"
+    pub color: Option<String>,
+
+    /// Cor do caminho (/mnt/c/...)
+    pub path_color: Option<String>,
+
+    /// Cor do símbolo (setinha >)
+    pub symbol_color: Option<String>,
+
+    /// Define se deve mostrar a branch atual do Git.
+    /// * Padrão: `true`
+    pub show_git: Option<bool>,
+}
+
+// -----------------------------------------------------------------------------
+// HISTORY CONFIGURATION
+// -----------------------------------------------------------------------------
+
+/// Configurações do histórico de comandos.
 ///
-/// # A Dança do Terminal (Terminal Handoff)
-/// Para que o `Ctrl+C` vá para o processo certo, precisamos transferir a posse
-/// do terminal (STDIN) da Shell para o Processo Filho.
+/// Esta estrutura mapeia a seção `[history]` do arquivo `.clios.toml`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConfigHistory {
+    /// Nome do arquivo onde o histórico será salvo na pasta HOME.
+    /// * Padrão: `.clios_history`
+    pub file: Option<String>,
+
+    /// Número máximo de comandos a serem lembrados.
+    /// * Padrão: `1000`
+    pub max_entries: Option<usize>,
+}
+
+// -----------------------------------------------------------------------------
+// SYNTAX HIGHLIGHTING CONFIGURATION
+// -----------------------------------------------------------------------------
+
+/// Configurações de cores para o realce de sintaxe (Syntax Highlighting).
 ///
-/// 1. **Shell:** Ignora `SIGTTOU` (para não ser suspensa ao mexer no terminal).
-/// 2. **Fork:** Cria uma cópia do processo.
-/// 3. **Pai & Filho:** Ambos tentam setar o `setpgid` (para evitar race conditions).
-/// 4. **Pai:** Dá o terminal pro filho (`tcsetpgrp`) e espera (`waitpid`).
-/// 5. **Pai:** Quando o filho morre/para, pega o terminal de volta.
-pub fn execute_job_control(tokens: Vec<String>, background: bool) {
-    // Segurança: Ignorar SIGTTOU na shell
-    unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigIgn) }.unwrap();
+/// Mapeia a seção `[syntax]` do arquivo `.clios.toml`.
+/// Define as cores usadas enquanto o usuário digita um comando.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConfigSyntax {
+    /// Cor para comandos válidos (encontrados no sistema ou builtins).
+    /// * Padrão: "green"
+    pub valid_cmd: Option<String>,
 
-    match unsafe { unistd::fork() } {
-        Ok(unistd::ForkResult::Parent { child, .. }) => {
-            // --- CÓDIGO DO PAI (SHELL) ---
-            let pgid = child;
+    /// Cor para comandos inválidos (não encontrados).
+    /// * Padrão: "red"
+    pub invalid_cmd: Option<String>,
+}
 
-            let _ = unistd::setpgid(child, pgid);
+// -----------------------------------------------------------------------------
+// VERSION READING STRUCTURES
+// -----------------------------------------------------------------------------
 
-            if !background {
-                let _ = unistd::tcsetpgrp(std::io::stdin(), pgid);
+/// Struct para ler Cargo.toml
+#[derive(Deserialize)]
+pub struct CargoToml {
+    pub package: CargoPackage,
+}
 
-                match wait::waitpid(child, Some(WaitPidFlag::WUNTRACED)) {
-                    Ok(WaitStatus::Stopped(_, _sig)) => {
-                        println!("\n[Job {}] Pausado (Ctrl+Z)", child);
-                    }
-                    Ok(WaitStatus::Signaled(_, sig, _)) => {
-                        println!("\n[Job {}] Morto pelo sinal: {:?}", child, sig);
-                    }
-                    _ => {}
+#[derive(Deserialize)]
+pub struct CargoPackage {
+    pub version: String,
+}
+
+/// Struct para ler package.json
+#[derive(Deserialize)]
+pub struct PackageJson {
+    pub version: String,
+}
+
+/// Struct para ler pyproject.toml
+#[derive(Deserialize)]
+pub struct PyProjectToml {
+    pub project: Option<PyProjectSection>,
+    pub tool: Option<PyToolSection>,
+}
+
+#[derive(Deserialize)]
+pub struct PyProjectSection {
+    pub version: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PyToolSection {
+    pub poetry: Option<PyPoetrySection>,
+}
+
+#[derive(Deserialize)]
+pub struct PyPoetrySection {
+    pub version: Option<String>,
+}
+
+// -----------------------------------------------------------------------------
+// ROOT CONFIGURATION
+// -----------------------------------------------------------------------------
+
+/// A Configuração Raiz (Root) da Clios Shell.
+///
+/// Esta é a estrutura principal que representa o arquivo `~/.clios.toml` inteiro.
+/// O `serde` lê o arquivo e preenche estes campos automaticamente.
+///
+/// # Exemplo de Arquivo `.clios.toml`
+/// ```toml
+/// [prompt]
+/// symbol = "➜"
+/// color = "purple"
+///
+/// [history]
+/// max_entries = 5000
+/// ```
+#[derive(Debug, Deserialize, Clone)]
+pub struct CliosConfig {
+    /// Configurações da seção `[prompt]`.
+    pub prompt: Option<ConfigPrompt>,
+
+    /// Configurações da seção `[history]`.
+    pub history: Option<ConfigHistory>,
+
+    /// Configurações da seção `[syntax]`.
+    pub syntax: Option<ConfigSyntax>,
+
+    /// Tema do prompt (powerline ou classic).
+    pub theme: Option<String>,
+}
+
+impl CliosConfig {
+    /// Retorna a configuração padrão (Default) caso o arquivo não exista.
+    ///
+    /// # Valores Padrão
+    /// * **Prompt:** Símbolo `> `, Cor `blue`, Git `true`.
+    /// * **History:** Arquivo `.clios_history`, 1000 entradas.
+    pub fn default() -> Self {
+        Self {
+            prompt: Some(ConfigPrompt {
+                symbol: Some("> ".to_string()),
+                color: Some("blue".to_string()),
+                show_git: Some(true),
+                path_color: None,
+                symbol_color: None,
+            }),
+            history: Some(ConfigHistory {
+                file: Some(".clios_history".to_string()),
+                max_entries: Some(1000),
+            }),
+            syntax: Some(ConfigSyntax {
+                valid_cmd: Some("green".to_string()),
+                invalid_cmd: Some("red".to_string()),
+            }),
+            theme: Some("powerline".to_string()),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LOADING FUNCTIONS
+// -----------------------------------------------------------------------------
+
+/// Carrega a configuração do usuário a partir de um arquivo TOML.
+///
+/// # Estratégia de Carregamento
+/// 1. Busca pela variável de ambiente `$HOME`.
+/// 2. Tenta abrir o arquivo `$HOME/.clios.toml`.
+/// 3. Se o arquivo existir e for válido, retorna a `CliosConfig` preenchida.
+/// 4. Se o arquivo não existir ou tiver erros de sintaxe, retorna `CliosConfig::default()`
+///    e imprime um aviso no stderr (se for erro de sintaxe).
+pub fn load_toml_config() -> CliosConfig {
+    // 1. Constrói o caminho ~/.clios.toml
+    let config_path = env::var("HOME")
+        .map(|p| Path::new(&p).join(".clios.toml"))
+        .unwrap_or_else(|_| Path::new(".clios.toml").to_path_buf());
+
+    // 2. Tenta ler e fazer o parse
+    if config_path.exists()
+        && let Ok(contents) = std::fs::read_to_string(&config_path) {
+            match toml::from_str::<CliosConfig>(&contents) {
+                Ok(cfg) => return cfg, // Sucesso!
+                Err(e) => {
+                    eprintln!(
+                        "\x1b[1;33m[AVISO CONFIG]\x1b[0m Erro no .clios.toml: {}",
+                        e
+                    );
+                    eprintln!("--> Usando configuração padrão.");
                 }
-
-                let shell_pgid = unistd::getpid();
-                let _ = unistd::tcsetpgrp(std::io::stdin(), shell_pgid);
-            } else {
-                println!("[Background Job {}]", child);
             }
         }
-        Ok(unistd::ForkResult::Child) => {
-            // --- CÓDIGO DO FILHO (COMANDO) ---
-            let pid = unistd::getpid();
-            let _ = unistd::setpgid(pid, pid);
 
-            if !background {
-                let _ = unistd::tcsetpgrp(std::io::stdin(), pid);
-            }
+    // 3. Fallback para padrão
+    CliosConfig::default()
+}
 
-            unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigDfl) }.unwrap();
-            unsafe { signal::signal(Signal::SIGINT, SigHandler::SigDfl) }.unwrap();
-
-            use std::os::unix::process::CommandExt;
-
-            let err = Command::new(&tokens[0]).args(&tokens[1..]).exec();
-
-            eprintln!("Erro ao executar '{}': {}", tokens[0], err);
-            std::process::exit(1);
-        }
-        Err(_) => println!("Fork falhou - Sistema sem recursos"),
+/// Converte um nome de cor legível (ex: "red") para seu código ANSI correspondente.
+///
+/// Esta função é usada para traduzir as configurações do usuário no arquivo TOML
+/// para os caracteres de escape que o terminal entende.
+///
+/// # Cores Suportadas
+/// * red, green, yellow, blue, purple, cyan, white.
+/// * Qualquer outra string retorna o código de reset/padrão.
+pub fn get_color_ansi(color_name: &str) -> String {
+    match color_name {
+        "red" => "\x1b[31m".to_string(),
+        "green" => "\x1b[32m".to_string(),
+        "yellow" => "\x1b[33m".to_string(),
+        "blue" => "\x1b[34m".to_string(),
+        "purple" => "\x1b[35m".to_string(),
+        "cyan" => "\x1b[36m".to_string(),
+        "white" => "\x1b[37m".to_string(),
+        _ => "\x1b[0m".to_string(), // Default (sem cor)
     }
 }
 
 
-// =====================================================================================
-// src/rhai_integration.rs
-// =====================================================================================
+// ============================================================================
+// FILE: src/completion.rs
+// ============================================================================
+//! # Completion Module
+//!
+//! Provides autocomplete and syntax highlighting for the shell using rustyline.
 
+use rustyline::completion::{Completer, Pair};
+use rustyline::highlight::{CmdKind, Highlighter};
+use rustyline::hint::HistoryHinter;
+use rustyline::Context;
+use rustyline::{Helper, Hinter, Validator};
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::sync::{Arc, RwLock};
+use which::which;
+
+// -----------------------------------------------------------------------------
+// CLIOS HELPER
+// -----------------------------------------------------------------------------
+
+/// # CliosHelper (O Cérebro Visual)
+///
+/// Esta estrutura é exigida pelo `rustyline` para gerenciar a interação com o usuário.
+/// Ela agrupa todas as funcionalidades de "UX" (User Experience) do terminal.
+///
+/// ## Funcionalidades:
+/// * **Completer:** Autocomplete de arquivos e comandos quando aperta TAB.
+/// * **Hinter:** Sugestão cinza baseada no histórico.
+/// * **Highlighter:** Colore o comando enquanto você digita (Verde/Vermelho).
+#[derive(Helper, Hinter, Validator)]
+pub struct CliosHelper {
+    /// O sugestor baseado no histórico (HistoryHinter).
+    #[rustyline(Hinter)]
+    pub hinter: HistoryHinter,
+
+    /// Armazena a versão colorida do prompt (com códigos ANSI).
+    #[rustyline(Ignore)]
+    pub colored_prompt: String,
+
+    /// Cor para comandos válidos.
+    #[rustyline(Ignore)]
+    pub color_valid: String,
+
+    /// Cor para comandos inválidos.
+    #[rustyline(Ignore)]
+    pub color_invalid: String,
+    
+    /// Mapa de aliases para autocomplete (compartilhado com a shell)
+    #[rustyline(Ignore)]
+    pub aliases: Arc<RwLock<HashMap<String, String>>>,
+}
+
+impl CliosHelper {
+    /// Creates a new CliosHelper with the given colors.
+    pub fn new(color_valid: String, color_invalid: String) -> Self {
+        Self {
+            hinter: HistoryHinter {},
+            colored_prompt: String::new(),
+            color_valid,
+            color_invalid,
+            aliases: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+    
+    /// Atualiza os aliases disponíveis para autocomplete
+    #[allow(dead_code)]
+    pub fn set_aliases(&mut self, aliases: HashMap<String, String>) {
+        if let Ok(mut lock) = self.aliases.write() {
+            *lock = aliases;
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HIGHLIGHTER IMPLEMENTATION
+// -----------------------------------------------------------------------------
+
+impl Highlighter for CliosHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        default: bool,
+    ) -> Cow<'b, str> {
+        if default {
+            Cow::Borrowed(&self.colored_prompt)
+        } else {
+            Cow::Borrowed(prompt)
+        }
+    }
+
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        let input = line.trim();
+        if input.is_empty() {
+            return Cow::Borrowed(line);
+        }
+        let first_word = input.split_whitespace().next().unwrap_or("");
+
+        let is_valid = matches!(
+            first_word,
+            "cd" | "exit" | "pwd" | "alias" | "rhai" | "fg" | "export" | "history" | "source" | "load" | "plugins"
+        ) || which(first_word).is_ok();
+
+        if is_valid {
+            Cow::Owned(format!("{}{}\x1b[0m", self.color_valid, line))
+        } else {
+            Cow::Owned(format!("{}{}\x1b[0m", self.color_invalid, line))
+        }
+    }
+
+    fn highlight_char(&self, _line: &str, _pos: usize, _forced: CmdKind) -> bool {
+        true
+    }
+}
+
+// -----------------------------------------------------------------------------
+// COMPLETER IMPLEMENTATION
+// -----------------------------------------------------------------------------
+
+/// Lista de builtins para autocomplete
+const BUILTINS: &[&str] = &[
+    "cd", "pwd", "alias", "unalias", "export", "unset", "history",
+    "source", "load", "plugins", "rhai", "fg", "jobs", "type", "help", "version", "exit",
+];
+
+impl Completer for CliosHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let (start, word_to_complete) = extract_word(line, pos);
+        let mut matches = Vec::new();
+        
+        // Verifica se é a primeira palavra (comando)
+        let is_first_word = !line[..start].chars().any(|c| !c.is_whitespace());
+
+        if is_first_word {
+            // Autocomplete de comandos: builtins, aliases, e PATH
+            let prefix_lower = word_to_complete.to_lowercase();
+            
+            // 1. Builtins
+            for builtin in BUILTINS {
+                if builtin.to_lowercase().starts_with(&prefix_lower) {
+                    matches.push(Pair {
+                        display: builtin.to_string(),
+                        replacement: builtin.to_string(),
+                    });
+                }
+            }
+            
+            // 2. Aliases
+            if let Ok(aliases) = self.aliases.read() {
+                for alias_name in aliases.keys() {
+                    if alias_name.to_lowercase().starts_with(&prefix_lower) {
+                        matches.push(Pair {
+                            display: format!("{} (alias)", alias_name),
+                            replacement: alias_name.clone(),
+                        });
+                    }
+                }
+            }
+            
+            // 3. Comandos do PATH
+            if let Ok(path_var) = env::var("PATH") {
+                for path_dir in path_var.split(':') {
+                    if let Ok(entries) = fs::read_dir(path_dir) {
+                        for entry in entries.flatten() {
+                            if let Ok(name) = entry.file_name().into_string() {
+                                if name.to_lowercase().starts_with(&prefix_lower) {
+                                    // Evita duplicatas
+                                    if !matches.iter().any(|p| p.replacement == name) {
+                                        matches.push(Pair {
+                                            display: name.clone(),
+                                            replacement: name,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Autocomplete de arquivos (comportamento original)
+            let (dir, file_prefix) = if let Some(idx) = word_to_complete.rfind('/') {
+                (&word_to_complete[..idx + 1], &word_to_complete[idx + 1..])
+            } else {
+                ("", word_to_complete)
+            };
+
+            let dir_path = if dir.is_empty() {
+                ".".to_string()
+            } else {
+                dir.to_string()
+            };
+
+            if let Ok(entries) = fs::read_dir(&dir_path) {
+                for entry in entries.flatten() {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        if name.to_lowercase().starts_with(&file_prefix.to_lowercase()) {
+                            let replacement = format!("{}{}", dir, name);
+                            matches.push(Pair {
+                                display: name,
+                                replacement,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((start, matches))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HELPER FUNCTIONS
+// -----------------------------------------------------------------------------
+
+/// Função auxiliar para pegar a palavra que está sendo digitada (separa por espaços)
+fn extract_word(line: &str, pos: usize) -> (usize, &str) {
+    let line_before_cursor = &line[..pos];
+    if let Some(last_space) = line_before_cursor.rfind(char::is_whitespace) {
+        (last_space + 1, &line_before_cursor[last_space + 1..])
+    } else {
+        (0, line_before_cursor)
+    }
+}
+
+
+// ============================================================================
+// FILE: src/rhai_integration.rs
+// ============================================================================
 //! # Rhai Integration Module
 //!
 //! Handles the Rhai scripting engine setup, including all registered functions
@@ -2491,181 +2975,9 @@ pub fn try_execute_plugin_function(
 }
 
 
-// =====================================================================================
-// src/completion.rs
-// =====================================================================================
-
-//! # Completion Module
-//!
-//! Provides autocomplete and syntax highlighting for the shell using rustyline.
-
-use rustyline::completion::{Completer, Pair};
-use rustyline::highlight::{CmdKind, Highlighter};
-use rustyline::hint::HistoryHinter;
-use rustyline::Context;
-use rustyline::{Helper, Hinter, Validator};
-use std::borrow::Cow;
-use std::fs;
-use which::which;
-
-// -----------------------------------------------------------------------------
-// CLIOS HELPER
-// -----------------------------------------------------------------------------
-
-/// # CliosHelper (O Cérebro Visual)
-///
-/// Esta estrutura é exigida pelo `rustyline` para gerenciar a interação com o usuário.
-/// Ela agrupa todas as funcionalidades de "UX" (User Experience) do terminal.
-///
-/// ## Funcionalidades:
-/// * **Completer:** Autocomplete de arquivos quando aperta TAB.
-/// * **Hinter:** Sugestão cinza baseada no histórico.
-/// * **Highlighter:** Colore o comando enquanto você digita (Verde/Vermelho).
-#[derive(Helper, Hinter, Validator)]
-pub struct CliosHelper {
-    /// O sugestor baseado no histórico (HistoryHinter).
-    #[rustyline(Hinter)]
-    pub hinter: HistoryHinter,
-
-    /// Armazena a versão colorida do prompt (com códigos ANSI).
-    #[rustyline(Ignore)]
-    pub colored_prompt: String,
-
-    /// Cor para comandos válidos.
-    #[rustyline(Ignore)]
-    pub color_valid: String,
-
-    /// Cor para comandos inválidos.
-    #[rustyline(Ignore)]
-    pub color_invalid: String,
-}
-
-impl CliosHelper {
-    /// Creates a new CliosHelper with the given colors.
-    pub fn new(color_valid: String, color_invalid: String) -> Self {
-        Self {
-            hinter: HistoryHinter {},
-            colored_prompt: String::new(),
-            color_valid,
-            color_invalid,
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// HIGHLIGHTER IMPLEMENTATION
-// -----------------------------------------------------------------------------
-
-impl Highlighter for CliosHelper {
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
-        &'s self,
-        prompt: &'p str,
-        default: bool,
-    ) -> Cow<'b, str> {
-        if default {
-            Cow::Borrowed(&self.colored_prompt)
-        } else {
-            Cow::Borrowed(prompt)
-        }
-    }
-
-    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let input = line.trim();
-        if input.is_empty() {
-            return Cow::Borrowed(line);
-        }
-        let first_word = input.split_whitespace().next().unwrap_or("");
-
-        let is_valid = matches!(
-            first_word,
-            "cd" | "exit" | "pwd" | "alias" | "rhai" | "fg" | "export" | "history" | "source" | "load" | "plugins"
-        ) || which(first_word).is_ok();
-
-        if is_valid {
-            Cow::Owned(format!("{}{}\x1b[0m", self.color_valid, line))
-        } else {
-            Cow::Owned(format!("{}{}\x1b[0m", self.color_invalid, line))
-        }
-    }
-
-    fn highlight_char(&self, _line: &str, _pos: usize, _forced: CmdKind) -> bool {
-        true
-    }
-}
-
-// -----------------------------------------------------------------------------
-// COMPLETER IMPLEMENTATION
-// -----------------------------------------------------------------------------
-
-impl Completer for CliosHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        _ctx: &Context,
-    ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        let (start, path_to_complete) = extract_word(line, pos);
-        let mut matches = Vec::new();
-
-        // 1. Identifica diretório base e o que estamos digitando
-        let (dir, file_prefix) = if let Some(idx) = path_to_complete.rfind('/') {
-            (&path_to_complete[..idx + 1], &path_to_complete[idx + 1..])
-        } else {
-            ("", path_to_complete)
-        };
-
-        // Resolve o caminho real para ler o disco
-        let dir_path = if dir.is_empty() {
-            ".".to_string()
-        } else {
-            dir.to_string()
-        };
-
-        // Tenta ler o diretório
-        if let Ok(entries) = fs::read_dir(&dir_path) {
-            for entry in entries.flatten() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    // Smart Case: Comparamos tudo em minúsculo
-                    if name
-                        .to_lowercase()
-                        .starts_with(&file_prefix.to_lowercase())
-                    {
-                        let replacement = format!("{}{}", dir, name);
-
-                        matches.push(Pair {
-                            display: name,
-                            replacement,
-                        });
-                    }
-                }
-            }
-        }
-
-        Ok((start, matches))
-    }
-}
-
-// -----------------------------------------------------------------------------
-// HELPER FUNCTIONS
-// -----------------------------------------------------------------------------
-
-/// Função auxiliar para pegar a palavra que está sendo digitada (separa por espaços)
-fn extract_word(line: &str, pos: usize) -> (usize, &str) {
-    let line_before_cursor = &line[..pos];
-    if let Some(last_space) = line_before_cursor.rfind(char::is_whitespace) {
-        (last_space + 1, &line_before_cursor[last_space + 1..])
-    } else {
-        (0, line_before_cursor)
-    }
-}
-
-
-// =====================================================================================
-// src/tests.rs
-// =====================================================================================
-
+// ============================================================================
+// FILE: src/tests.rs
+// ============================================================================
 //! Testes Unitários para Clios Shell
 //! 
 //! Execute com: cargo test
@@ -2921,3 +3233,7 @@ mod tests {
         assert!(!result.is_empty());
     }
 }
+
+// ============================================================================
+// END OF COMPLETE CODE
+// ============================================================================

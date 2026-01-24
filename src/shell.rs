@@ -11,10 +11,10 @@
 use crate::builtins::{handle_builtin, BuiltinResult};
 use crate::config::CliosConfig;
 use crate::expansion::{
-    expand_alias_string, expand_globs, expand_subshells, expand_tilde, expand_variables,
-    split_logical_and,
+    expand_alias_string, expand_globs, expand_subshells, expand_tilde, expand_variables_with_state,
+    split_logical_operators, LogicalOp,
 };
-use crate::jobs::execute_job_control;
+use crate::jobs::{execute_job_control, JobList, new_job_list};
 use crate::pipeline::execute_pipeline;
 use crate::rhai_integration::{create_rhai_engine, try_execute_plugin_function};
 
@@ -101,6 +101,9 @@ pub struct CliosShell {
 
     /// AST do script de inicialização (se houver).
     pub plugin_ast: Option<AST>,
+    
+    /// Lista de jobs em background
+    pub jobs: JobList,
 }
 
 impl CliosShell {
@@ -116,15 +119,16 @@ impl CliosShell {
             last_exit_code: 0,
             previous_dir: None,
             config,
+            jobs: new_job_list(),
         }
     }
 
     /// NÍVEL 12: Carregador de Plugins (Compilação Única)
-    pub fn load_plugin(&mut self, path: &str) {
+    /// Retorna Ok(()) em sucesso ou Err(mensagem) em falha
+    pub fn load_plugin(&mut self, path: &str) -> Result<(), String> {
         // Verificar se o arquivo existe
         if !std::path::Path::new(path).exists() {
-            eprintln!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Arquivo não encontrado: {}", path);
-            return;
+            return Err(format!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Arquivo não encontrado: {}", path));
         }
 
         match self.rhai_engine.compile_file(path.into()) {
@@ -134,11 +138,10 @@ impl CliosShell {
                 } else {
                     self.plugin_ast = Some(new_ast);
                 }
-                // Sucesso silencioso - apenas erros são exibidos
+                Ok(())
             }
             Err(e) => {
-                eprintln!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}'", path);
-                eprintln!("  Detalhes: {}", e);
+                Err(format!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}'\n  Detalhes: {}", path, e))
             }
         }
     }
@@ -154,7 +157,9 @@ impl CliosShell {
 
                 if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rhai")
                     && let Some(path_str) = path.to_str() {
-                        self.load_plugin(path_str);
+                        if let Err(e) = self.load_plugin(path_str) {
+                            eprintln!("{}", e);
+                        }
                     }
             }
         }
@@ -191,28 +196,35 @@ impl CliosShell {
     }
 
     /// O Cérebro da Execução: Processa uma linha de entrada bruta.
+    /// Suporta operadores && (AND) e || (OR) com curto-circuito.
     pub fn process_input_line(&mut self, input: &str) {
         let input_expanded = expand_subshells(input);
 
-        let logical_parts = split_logical_and(&input_expanded);
+        let logical_parts = split_logical_operators(&input_expanded);
 
         for part in logical_parts {
-            let expanded_part = expand_alias_string(&part, &self.aliases);
+            let expanded_part = expand_alias_string(&part.command, &self.aliases);
 
-            if expanded_part != part && expanded_part.contains("&&") {
+            // Se o alias expandido contém operadores lógicos, processa recursivamente
+            if expanded_part != part.command && (expanded_part.contains("&&") || expanded_part.contains("||")) {
                 self.process_input_line(&expanded_part);
 
-                if self.last_exit_code != 0 {
-                    break;
+                // Aplica curto-circuito baseado no operador
+                match part.next_op {
+                    Some(LogicalOp::And) if self.last_exit_code != 0 => break,
+                    Some(LogicalOp::Or) if self.last_exit_code == 0 => break,
+                    _ => continue,
                 }
-                continue;
             }
 
             let exit_code = self.execute_single_command_block(&expanded_part);
             self.last_exit_code = exit_code;
 
-            if exit_code != 0 {
-                break;
+            // Curto-circuito baseado no operador
+            match part.next_op {
+                Some(LogicalOp::And) if exit_code != 0 => break,  // && falha: para
+                Some(LogicalOp::Or) if exit_code == 0 => break,   // || sucesso: para
+                _ => {}  // Continua para o próximo comando
             }
         }
     }
@@ -256,7 +268,7 @@ impl CliosShell {
 
             // Expansões finais
             if tokens.first().map(|s| s.as_str()) != Some("rhai") {
-                tokens = expand_variables(tokens);
+                tokens = expand_variables_with_state(tokens, self.last_exit_code, std::process::id());
                 tokens = expand_tilde(tokens);
                 tokens = expand_globs(tokens);
             }
@@ -281,6 +293,13 @@ impl CliosShell {
                 }
 
             // 2. Tenta Builtin
+            // Obtém arquivo de histórico da config
+            let history_file = self.config.history
+                .as_ref()
+                .and_then(|h| h.file.as_deref())
+                .unwrap_or(".clios_history");
+            
+            let jobs_ref = self.jobs.clone();
             let result = handle_builtin(
                 &tokens,
                 &mut self.aliases,
@@ -288,7 +307,7 @@ impl CliosShell {
                 &mut self.rhai_engine,
                 &mut self.rhai_scope,
                 &mut self.plugin_ast,
-                |engine, ast, path| {
+                |engine, ast, path| -> Result<(), String> {
                     match engine.compile_file(path.into()) {
                         Ok(new_ast) => {
                             if let Some(existing_ast) = ast {
@@ -296,10 +315,13 @@ impl CliosShell {
                             } else {
                                 *ast = Some(new_ast);
                             }
+                            Ok(())
                         }
-                        Err(e) => eprintln!("Erro ao compilar plugin: {}", e),
+                        Err(e) => Err(format!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}': {}", path, e)),
                     }
                 },
+                history_file,
+                &jobs_ref,
             );
 
             match result {
@@ -343,7 +365,7 @@ impl CliosShell {
                     continue;
                 }
 
-                let tokens = expand_variables(tokens);
+                let tokens = expand_variables_with_state(tokens, self.last_exit_code, std::process::id());
                 let tokens = expand_tilde(tokens);
                 let tokens = expand_globs(tokens);
 

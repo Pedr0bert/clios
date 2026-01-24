@@ -1,6 +1,6 @@
 # Clios Shell - Capacidades e Funcionalidades Completas
 
-> Documentação completa para treinamento de IA - Todas as funcionalidades, comandos e capacidades do Clios Shell v1.0.0
+> Documentação completa para treinamento de IA - Todas as funcionalidades, comandos e capacidades do Clios Shell v0.7.0
 
 ## Índice
 
@@ -11,8 +11,9 @@
 5. [Plugins Rhai](#plugins-rhai)
 6. [Scripts Utilitários](#scripts-utilitários)
 7. [Aliases Pré-configurados](#aliases-pré-configurados)
-8. [Configuração](#configuração)
-9. [Exemplos de Uso](#exemplos-de-uso)
+8. [Autocomplete Inteligente](#autocomplete-inteligente)
+9. [Configuração](#configuração)
+10. [Exemplos de Uso](#exemplos-de-uso)
 
 ---
 
@@ -26,7 +27,7 @@ Clios Shell é uma shell híbrida Rust + Rhai para Linux/Unix que combina:
 - Sistema de plugins extensível
 - Prompt powerline personalizado
 
-**Versão:** 1.0.0  
+**Versão:** 0.7.0  
 **Linguagem:** Rust  
 **Scripting:** Rhai  
 **Plataformas:** Linux, macOS, WSL
@@ -369,6 +370,40 @@ sleep 100
 fg 12345
 ```
 
+#### `jobs`
+Lista todos os processos em background.
+
+**Sintaxe:**
+```bash
+jobs
+```
+
+**Saída:**
+```
+Jobs em background:
+  [12345] sleep 100 (rodando há 15s)
+  [12346] python server.py (rodando há 2m 30s)
+```
+
+**Informações exibidas:**
+- PID do processo
+- Comando original
+- Tempo de execução
+- Status (running/stopped)
+
+**Exemplo:**
+```bash
+# Iniciar processos em background
+sleep 60 &
+python app.py &
+
+# Listar jobs
+jobs
+
+# Trazer para foreground
+fg 12345
+```
+
 ---
 
 ### Informações e Ajuda
@@ -411,7 +446,7 @@ version
 
 **Saída:**
 ```
-Clios Shell v1.0.0 (Final Release)
+Clios Shell v0.7.0
 Desenvolvido em Rust
 ```
 
@@ -469,6 +504,44 @@ cd /tmp && ls -la
 mkdir projeto && cd projeto && git init
 cargo build && cargo test && cargo run
 ```
+
+### Lógica Condicional OR (||)
+
+Executa segundo comando apenas se o primeiro falhar (exit code != 0).
+
+**Sintaxe:**
+```bash
+comando1 || comando2 || comando3
+```
+
+**Comportamento:**
+- Para no primeiro sucesso
+- Respeita aspas
+- Curto-circuito (short-circuit)
+- Útil para fallbacks e tratamento de erros
+
+**Exemplos:**
+```bash
+# Fallback se comando falhar
+cat arquivo.txt || echo "Arquivo não encontrado"
+
+# Tenta múltiplas alternativas
+which python3 || which python || echo "Python não instalado"
+
+# Tratamento de erro
+mkdir pasta || echo "Falha ao criar pasta"
+
+# Combinado com &&
+git pull && cargo build || echo "Build falhou"
+```
+
+**Tabela de comportamento:**
+| Comando 1 | Operador | Comando 2 | Resultado |
+|-----------|----------|-----------|------------|
+| Sucesso (0) | `&&` | Executa | Continua |
+| Falha (!0) | `&&` | Ignora | Para |
+| Sucesso (0) | `\|\|` | Ignora | Para |
+| Falha (!0) | `\|\|` | Executa | Continua |
 
 ### Redirecionamento de Saída
 
@@ -537,6 +610,35 @@ comando > saida.txt 2> erros.txt
 comando >> saida.txt 2> erros.txt
 ```
 
+### Redirecionamento de Entrada (<)
+
+Redireciona conteúdo de arquivo para stdin de um comando.
+
+**Sintaxe:**
+```bash
+comando < arquivo.txt
+```
+
+**Comportamento:**
+- Arquivo é lido e enviado para stdin do comando
+- Equivale a `cat arquivo | comando` mas mais eficiente
+- Erro se arquivo não existir
+
+**Exemplos:**
+```bash
+# Contar linhas de um arquivo
+wc -l < arquivo.txt
+
+# Processar dados
+sort < dados.txt
+
+# Combinar com redirecionamento de saída
+sort < entrada.txt > saida.txt
+
+# Usar em programas interativos
+python script.py < input.txt
+```
+
 ### Background (&)
 
 Executa comando em background (não bloqueia terminal).
@@ -587,6 +689,55 @@ echo Backup_${USER}.tar.gz
 - `$PATH` - Caminho de busca de executáveis
 - `$PWD` - Diretório atual
 - `$SHELL` - Shell atual
+
+### Variáveis Especiais de Estado
+
+Variáveis dinâmicas que refletem o estado da shell.
+
+#### `$?` - Código de Saída
+
+Retorna o exit code do último comando executado.
+
+**Valores comuns:**
+- `0` - Sucesso
+- `1` - Erro genérico
+- `127` - Comando não encontrado
+- `130` - Interrompido por Ctrl+C
+
+**Exemplos:**
+```bash
+# Verificar sucesso
+ls /tmp
+echo "Exit code: $?"
+
+# Usar em lógica
+grep "padrão" arquivo.txt
+if [ $? -eq 0 ]; then echo "Encontrado"; fi
+
+# Combinar com operadores
+false || echo "Falhou com código $?"
+```
+
+#### `$$` - PID da Shell
+
+Retorna o Process ID da shell atual.
+
+**Uso comum:**
+- Criar arquivos temporários únicos
+- Identificar a instância da shell
+- Logs com identificação de processo
+
+**Exemplos:**
+```bash
+# Identificar shell
+echo "PID da shell: $$"
+
+# Arquivo temporário único
+echo "dados" > /tmp/backup_$$.txt
+
+# Log identificado
+echo "[$$] Iniciando processo" >> /var/log/app.log
+```
 
 ### Til (~)
 
@@ -1218,6 +1369,64 @@ extract   # Extrai qualquer arquivo compactado
 
 ---
 
+## Autocomplete Inteligente
+
+O Clios Shell possui autocompletar contextual ativado com a tecla **Tab**.
+
+### Tipos de Autocomplete
+
+#### Comandos (primeira palavra)
+
+Quando a linha está vazia ou digitando a primeira palavra, Tab completa:
+
+1. **Builtins** - Comandos internos da shell
+2. **Aliases** - Atalhos definidos pelo usuário
+3. **Executáveis do PATH** - Programas instalados no sistema
+
+**Exemplo:**
+```bash
+ca<Tab>    # Sugere: cargo, cat, cal, etc.
+gi<Tab>    # Sugere: git, gist, gimp, etc.
+```
+
+#### Arquivos (argumentos)
+
+Após o primeiro espaço, Tab completa arquivos e diretórios:
+
+```bash
+cat REA<Tab>         # Completa: README.md
+cd src/<Tab>         # Lista: builtins.rs, shell.rs, etc.
+vim ~/.cl<Tab>       # Completa: ~/.cliosrc
+```
+
+### Builtins Suportados no Autocomplete
+
+```
+cd, pwd, exit, help, history, alias, unalias, export, unset,
+source, load, rhai, type, version, fg, jobs, plugins, echo
+```
+
+### Comportamento
+
+| Contexto | Tab Completa |
+|----------|--------------|
+| Linha vazia | Comandos (builtins + aliases + PATH) |
+| Primeira palavra | Comandos que iniciam com prefixo |
+| Após primeiro espaço | Arquivos e diretórios |
+| Após `cd ` | Apenas diretórios |
+| Após `source ` | Arquivos .rhai |
+
+### Syntax Highlighting
+
+O Clios também oferece colorização em tempo real:
+
+- **Verde** - Comandos válidos (encontrados no PATH)
+- **Vermelho** - Comandos inexistentes
+- **Azul** - Argumentos e strings
+- **Cinza** - Comentários
+
+---
+
 ## Configuração
 
 ### Arquivo ~/.cliosrc
@@ -1664,7 +1873,7 @@ gitstat                 # Estatísticas Git
 
 ## Conclusão
 
-Clios Shell v1.0.0 é uma shell completa e moderna que combina:
+Clios Shell v0.7.0 é uma shell completa e moderna que combina:
 
 - **45+ comandos** entre builtins, aliases e scripts
 - **30+ funções Rhai** distribuídas em 3 plugins

@@ -21,10 +21,20 @@ use std::process::Command;
 /// Varre cada token procurando por padrões `$VAR` ou `${VAR}` e substitui
 /// pelo valor real do sistema operacional. Funciona inclusive no meio de strings.
 ///
+/// Também suporta variáveis especiais:
+/// - `$?` - Código de saída do último comando
+/// - `$$` - PID da shell atual
+///
 /// # Exemplo
 /// * Entrada: `echo Backup_$USER.tar.gz`
 /// * Saída: `echo Backup_pedro.tar.gz`
+#[allow(dead_code)]
 pub fn expand_variables(tokens: Vec<String>) -> Vec<String> {
+    expand_variables_with_state(tokens, 0, std::process::id())
+}
+
+/// Versão com estado para suportar $? e $$
+pub fn expand_variables_with_state(tokens: Vec<String>, last_exit_code: i32, shell_pid: u32) -> Vec<String> {
     tokens
         .into_iter()
         .map(|token| {
@@ -38,7 +48,24 @@ pub fn expand_variables(tokens: Vec<String>) -> Vec<String> {
 
             while let Some(c) = chars.next() {
                 if c == '$' {
-                    // Início de uma variável.
+                    // Variáveis especiais de um único caractere
+                    if let Some(&next_c) = chars.peek() {
+                        match next_c {
+                            '?' => {
+                                chars.next(); // Consome '?'
+                                output.push_str(&last_exit_code.to_string());
+                                continue;
+                            }
+                            '$' => {
+                                chars.next(); // Consome '$'
+                                output.push_str(&shell_pid.to_string());
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    
+                    // Início de uma variável normal
                     let mut var_name = String::new();
                     let mut is_bracketed = false;
 
@@ -302,7 +329,7 @@ fn expand_alias_string_with_depth(input: &str, aliases: &HashMap<String, String>
             .unwrap_or("");
         
         if expanded_first_word == first_word {
-            eprintln!("\x1b[1;33m[AVISO]\x1b[0m Alias '{}' se refere a si mesmo, usando comando original", first_word);
+            //eprintln!("\x1b[1;33m[AVISO]\x1b[0m Alias '{}' se refere a si mesmo, usando comando original", first_word);
             return input.to_string();
         }
         
@@ -314,15 +341,31 @@ fn expand_alias_string_with_depth(input: &str, aliases: &HashMap<String, String>
 }
 
 // -----------------------------------------------------------------------------
-// LOGICAL AND PARSER
+// LOGICAL OPERATORS PARSER
 // -----------------------------------------------------------------------------
 
-/// Parser Lógico de `&&` com Contexto (Nível 10).
+/// Tipo de operador lógico encontrado
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOp {
+    And,  // &&
+    Or,   // ||
+}
+
+/// Uma parte do comando com o operador que a segue
+#[derive(Debug, Clone)]
+pub struct LogicalPart {
+    pub command: String,
+    pub next_op: Option<LogicalOp>,
+}
+
+/// Parser Lógico de `&&` e `||` com Contexto (Nível 10).
 ///
 /// Esta função resolve o bug onde `echo "a && b"` era dividido incorretamente.
 /// Ela percorre a string caractere por caractere mantendo um **Estado Interno**
 /// para saber se está dentro de aspas ou não.
-pub fn split_logical_and(input: &str) -> Vec<String> {
+///
+/// Retorna uma lista de partes com seus operadores, permitindo curto-circuito.
+pub fn split_logical_operators(input: &str) -> Vec<LogicalPart> {
     let mut parts = Vec::new();
     let mut current_part = String::new();
 
@@ -349,10 +392,28 @@ pub fn split_logical_and(input: &str) -> Vec<String> {
                 if !in_single_quote && !in_double_quote
                     && let Some(&'&') = chars.peek() {
                         if !current_part.trim().is_empty() {
-                            parts.push(current_part.clone());
+                            parts.push(LogicalPart {
+                                command: current_part.clone(),
+                                next_op: Some(LogicalOp::And),
+                            });
                         }
                         current_part.clear();
                         chars.next(); // Consome o segundo '&'
+                        continue;
+                    }
+                current_part.push(c);
+            }
+            '|' => {
+                if !in_single_quote && !in_double_quote
+                    && let Some(&'|') = chars.peek() {
+                        if !current_part.trim().is_empty() {
+                            parts.push(LogicalPart {
+                                command: current_part.clone(),
+                                next_op: Some(LogicalOp::Or),
+                            });
+                        }
+                        current_part.clear();
+                        chars.next(); // Consome o segundo '|'
                         continue;
                     }
                 current_part.push(c);
@@ -362,7 +423,19 @@ pub fn split_logical_and(input: &str) -> Vec<String> {
     }
 
     if !current_part.trim().is_empty() {
-        parts.push(current_part);
+        parts.push(LogicalPart {
+            command: current_part,
+            next_op: None,
+        });
     }
     parts
+}
+
+/// Mantém compatibilidade com código existente - retorna apenas Vec<String>
+#[allow(dead_code)]
+pub fn split_logical_and(input: &str) -> Vec<String> {
+    split_logical_operators(input)
+        .into_iter()
+        .map(|p| p.command)
+        .collect()
 }

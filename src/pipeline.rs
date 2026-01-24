@@ -31,18 +31,21 @@ const EXIT_ERROR: i32 = 1;
 /// e o remove da lista de argumentos do comando.
 ///
 /// # Operadores Suportados
+/// * `<`   : Redireciona **STDIN** (Lê do arquivo).
 /// * `>`   : Redireciona **STDOUT** (Sobrescreve o arquivo).
 /// * `>>`  : Redireciona **STDOUT** (Adiciona ao final do arquivo - Append).
 /// * `2>`  : Redireciona **STDERR** (Sobrescreve o arquivo).
 /// * `2>>` : Redireciona **STDERR** (Adiciona ao final do arquivo - Append).
 ///
 /// # Retorno
-/// Retorna uma tupla `(Vec<String>, Option<File>, Option<File>)`:
+/// Retorna uma tupla `(Vec<String>, Option<File>, Option<File>, Option<File>)`:
 /// 1. **Argumentos Limpos:** O comando sem os símbolos de redirecionamento.
-/// 2. **Arquivo Saída:** O arquivo aberto para onde vai o stdout (se houver).
-/// 3. **Arquivo Erro:** O arquivo aberto para onde vai o stderr (se houver).
-pub fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Option<File>) {
+/// 2. **Arquivo Entrada:** O arquivo aberto para onde vem o stdin (se houver).
+/// 3. **Arquivo Saída:** O arquivo aberto para onde vai o stdout (se houver).
+/// 4. **Arquivo Erro:** O arquivo aberto para onde vai o stderr (se houver).
+pub fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Option<File>, Option<File>) {
     let mut clean = Vec::new();
+    let mut stdin_file = None;
     let mut stdout_file = None;
     let mut stderr_file = None;
 
@@ -50,6 +53,19 @@ pub fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Optio
 
     while let Some(t) = iter.next() {
         match t.as_str() {
+            // Entrada Padrão (Read)
+            "<" => {
+                if let Some(f) = iter.next() {
+                    match File::open(f) {
+                        Ok(o) => stdin_file = Some(o),
+                        Err(e) => {
+                            eprintln!("\x1b[1;31m[ERRO REDIRECIONAMENTO]\x1b[0m Falha ao abrir '{}': {}", f, e);
+                        }
+                    }
+                } else {
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Operador '<' requer um arquivo");
+                }
+            }
             // Saída Padrão (Overwrite)
             ">" => {
                 if let Some(f) = iter.next() {
@@ -126,7 +142,7 @@ pub fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Optio
             _ => clean.push(t.clone()),
         }
     }
-    (clean, stdout_file, stderr_file)
+    (clean, stdin_file, stdout_file, stderr_file)
 }
 
 // -----------------------------------------------------------------------------
@@ -167,7 +183,7 @@ pub fn execute_pipeline(commands: Vec<Vec<String>>) -> i32 {
         }
 
         // 1. Separa o comando dos redirecionamentos de arquivo
-        let (mut args, outfile, errfile) = parse_redirection(tokens);
+        let (mut args, infile, outfile, errfile) = parse_redirection(tokens);
 
         if args.is_empty() {
             continue;
@@ -176,7 +192,10 @@ pub fn execute_pipeline(commands: Vec<Vec<String>>) -> i32 {
         let cmd = args.remove(0);
 
         // 2. Configuração do STDIN
-        let stdin = if let Some(mut child) = prev_cmd {
+        let stdin = if let Some(f) = infile {
+            // Redirecionamento de entrada tem prioridade
+            Stdio::from(f)
+        } else if let Some(mut child) = prev_cmd {
             Stdio::from(child.stdout.take().unwrap())
         } else {
             Stdio::inherit()
