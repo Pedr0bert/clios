@@ -68,7 +68,7 @@ git clone https://github.com/pedrohusky/clios-shell
 cd clios-shell
 
 # Execute o instalador
-./install.sh
+./scripts/install.sh
 ```
 
 O script de instalação irá:
