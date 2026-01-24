@@ -102,7 +102,7 @@ fn git_cheatsheet() {
 }
 
 // ============================================================================
-// MENSAGEM DE CARREGAMENTO
+// MENSAGEM DE CARREGAMENTO (desativada para output limpo)
 // ============================================================================
 
-print("   Plugin git_helpers.rhai carregado");
+// print("   Plugin git_helpers.rhai carregado");

@@ -134,7 +134,7 @@ impl CliosShell {
                 } else {
                     self.plugin_ast = Some(new_ast);
                 }
-                println!("\x1b[1;32m[OK]\x1b[0m Plugin carregado: {}", path);
+                // Sucesso silencioso - apenas erros são exibidos
             }
             Err(e) => {
                 eprintln!("\x1b[1;31m[ERRO PLUGIN]\x1b[0m Falha ao compilar '{}'", path);

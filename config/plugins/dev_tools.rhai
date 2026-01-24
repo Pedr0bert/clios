@@ -123,19 +123,21 @@ fn random_password(length) {
 // ============================================================================
 
 fn http_status(code) {
-    if code == 200 { print("200 - OK"); }
-    else if code == 201 { print("201 - Created"); }
-    else if code == 204 { print("204 - No Content"); }
-    else if code == 301 { print("301 - Moved Permanently"); }
-    else if code == 302 { print("302 - Found"); }
-    else if code == 400 { print("400 - Bad Request"); }
-    else if code == 401 { print("401 - Unauthorized"); }
-    else if code == 403 { print("403 - Forbidden"); }
-    else if code == 404 { print("404 - Not Found"); }
-    else if code == 500 { print("500 - Internal Server Error"); }
-    else if code == 502 { print("502 - Bad Gateway"); }
-    else if code == 503 { print("503 - Service Unavailable"); }
-    else { print("Código não encontrado: " + code.to_string()); }
+    switch code {
+        200 => print("200 - OK"),
+        201 => print("201 - Created"),
+        204 => print("204 - No Content"),
+        301 => print("301 - Moved Permanently"),
+        302 => print("302 - Found"),
+        400 => print("400 - Bad Request"),
+        401 => print("401 - Unauthorized"),
+        403 => print("403 - Forbidden"),
+        404 => print("404 - Not Found"),
+        500 => print("500 - Internal Server Error"),
+        502 => print("502 - Bad Gateway"),
+        503 => print("503 - Service Unavailable"),
+        _ => print("Código não encontrado: " + code.to_string())
+    }
 }
 
 /// Lista status HTTP comuns
@@ -151,7 +153,7 @@ fn http_codes() {
 }
 
 // ============================================================================
-// MENSAGEM DE CARREGAMENTO
+// MENSAGEM DE CARREGAMENTO (desativada para output limpo)
 // ============================================================================
 
-print("   Plugin dev_tools.rhai carregado");
+// print("   Plugin dev_tools.rhai carregado");

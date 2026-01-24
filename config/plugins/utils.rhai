@@ -210,7 +210,7 @@ fn format_bytes(bytes) {
 }
 
 // ============================================================================
-// MENSAGEM DE CARREGAMENTO
+// MENSAGEM DE CARREGAMENTO (desativada para output limpo)
 // ============================================================================
 
-print("   Plugin utils.rhai carregado");
+// print("   Plugin utils.rhai carregado");

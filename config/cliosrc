@@ -173,13 +173,14 @@ source ~/.clios_plugins/git_helpers.rhai
 source ~/.clios_plugins/dev_tools.rhai
 
 # ============================================================================
-# MENSAGEM DE BOAS-VINDAS
+# MENSAGEM DE BOAS-VINDAS (desativada para output limpo)
 # ============================================================================
 
-echo ""
-echo "   Clios Shell v1.0.0 carregado!"
-echo "   Comandos: help | sysinfo | gitstat | backup"
-echo ""
+# Para ativar, descomente as linhas abaixo:
+# echo ""
+# echo "   Clios Shell v1.0.0 carregado!"
+# echo "   Comandos: help | sysinfo | gitstat | backup"
+# echo ""
 
 # ============================================================================
 # FIM DA CONFIGURAÇÃO
