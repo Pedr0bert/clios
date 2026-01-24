@@ -132,9 +132,10 @@ mod tests {
             "/tmp/test_output.txt".to_string()
         ];
         
-        let (clean, stdout_file, stderr_file) = crate::pipeline::parse_redirection(&tokens);
+        let (clean, stdin_file, stdout_file, stderr_file) = crate::pipeline::parse_redirection(&tokens);
         
         assert_eq!(clean, vec!["echo", "test"]);
+        assert!(stdin_file.is_none());
         assert!(stdout_file.is_some());
         assert!(stderr_file.is_none());
     }
@@ -148,9 +149,10 @@ mod tests {
             "/tmp/test_error.txt".to_string()
         ];
         
-        let (clean, stdout_file, stderr_file) = crate::pipeline::parse_redirection(&tokens);
+        let (clean, stdin_file, stdout_file, stderr_file) = crate::pipeline::parse_redirection(&tokens);
         
         assert_eq!(clean, vec!["ls", "/nonexistent"]);
+        assert!(stdin_file.is_none());
         assert!(stdout_file.is_none());
         assert!(stderr_file.is_some());
     }
@@ -166,9 +168,10 @@ mod tests {
             "/tmp/err.txt".to_string()
         ];
         
-        let (clean, stdout_file, stderr_file) = crate::pipeline::parse_redirection(&tokens);
+        let (clean, stdin_file, stdout_file, stderr_file) = crate::pipeline::parse_redirection(&tokens);
         
         assert_eq!(clean, vec!["ls", "/tmp"]);
+        assert!(stdin_file.is_none());
         assert!(stdout_file.is_some());
         assert!(stderr_file.is_some());
     }
