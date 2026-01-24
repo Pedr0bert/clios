@@ -1,0 +1,186 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                     CLIOS SHELL - CONFIGURAÇÃO DE PRODUÇÃO                  ║
+# ║                              ~/.cliosrc v1.0.0                              ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ============================================================================
+# VARIÁVEIS DE AMBIENTE
+# ============================================================================
+
+export EDITOR=nano
+export VISUAL=code
+export LANG=pt_BR.UTF-8
+export LC_ALL=pt_BR.UTF-8
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+export CLICOLOR=1
+export LS_COLORS='di=1;34:ln=1;36:so=1;35:pi=33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;31:tw=1;34:ow=1;34'
+
+# Path adicional
+export PATH=$PATH:$HOME/.clios_scripts
+export PATH=$PATH:$HOME/.local/bin
+export PATH=$PATH:$HOME/.cargo/bin
+
+# ============================================================================
+# ALIASES DE NAVEGAÇÃO
+# ============================================================================
+
+alias ls='ls --color=auto'
+alias ll='ls -lahF'
+alias la='ls -A'
+alias l='ls -CF'
+alias lt='ls -lahFt'
+alias lS='ls -lahFS'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias .....='cd ../../../..'
+alias mkcd='mkdir -p'
+
+# ============================================================================
+# ALIASES DE SEGURANÇA
+# ============================================================================
+
+alias cp='cp -i'
+alias mv='mv -i'
+alias rm='rm -i'
+alias cpv='rsync -ah --progress'
+
+# ============================================================================
+# ALIASES DE BUSCA
+# ============================================================================
+
+alias grep='grep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias egrep='egrep --color=auto'
+alias ff='find . -type f -name'
+alias fd='find . -type d -name'
+
+# ============================================================================
+# ALIASES DE SISTEMA
+# ============================================================================
+
+alias df='df -h'
+alias du='du -h'
+alias duh='du -h --max-depth=1'
+alias free='free -h'
+alias psa='ps aux'
+alias psg='ps aux | grep -i'
+alias myip='curl -s ifconfig.me'
+alias ping5='ping -c 5'
+
+# ============================================================================
+# ALIASES PARA GIT
+# ============================================================================
+
+alias g='git'
+alias gs='git status'
+alias ga='git add'
+alias gaa='git add --all'
+alias gc='git commit -m'
+alias gca='git commit -am'
+alias gp='git push'
+alias gpl='git pull'
+alias gf='git fetch'
+alias gb='git branch'
+alias gba='git branch -a'
+alias gco='git checkout'
+alias gcob='git checkout -b'
+alias gm='git merge'
+alias gd='git diff'
+alias gds='git diff --staged'
+alias gl='git log --oneline --graph --decorate -10'
+alias gla='git log --oneline --graph --decorate --all'
+alias gst='git stash'
+alias gstp='git stash pop'
+alias gstl='git stash list'
+alias grh='git reset --hard'
+alias grs='git reset --soft'
+alias gclean='git clean -fd'
+
+# ============================================================================
+# ALIASES PARA DESENVOLVIMENTO - RUST
+# ============================================================================
+
+alias cb='cargo build'
+alias cbr='cargo build --release'
+alias cr='cargo run'
+alias crr='cargo run --release'
+alias ct='cargo test'
+alias cck='cargo check'
+alias ccl='cargo clippy'
+alias cf='cargo fmt'
+alias cw='cargo watch -x run'
+alias cu='cargo update'
+alias cdoc='cargo doc --open'
+
+# ============================================================================
+# ALIASES PARA DESENVOLVIMENTO - PYTHON/NODE/DOCKER
+# ============================================================================
+
+alias py='python3'
+alias pip='pip3'
+alias venv='python3 -m venv'
+alias activate='source venv/bin/activate'
+alias ni='npm install'
+alias nr='npm run'
+alias ns='npm start'
+alias nt='npm test'
+alias nb='npm run build'
+alias d='docker'
+alias dc='docker-compose'
+alias dps='docker ps'
+alias dpsa='docker ps -a'
+alias di='docker images'
+alias dprune='docker system prune -af'
+
+# ============================================================================
+# ALIASES DE ARQUIVOS E PRODUTIVIDADE
+# ============================================================================
+
+alias edit='nano'
+alias less='less -R'
+alias head20='head -n 20'
+alias tail20='tail -n 20'
+alias tailf='tail -f'
+alias targz='tar -czvf'
+alias untargz='tar -xzvf'
+alias c='clear'
+alias cls='clear'
+alias h='history'
+alias hg='history | grep'
+alias now='date +%Y-%m-%d_%H:%M:%S'
+alias today='date +%Y-%m-%d'
+
+# ============================================================================
+# ALIASES PARA SCRIPTS DO CLIOS
+# ============================================================================
+
+alias sysinfo='~/.clios_scripts/sysinfo.sh'
+alias backup='~/.clios_scripts/backup.sh'
+alias cleanup='~/.clios_scripts/cleanup.sh'
+alias gitstat='~/.clios_scripts/gitstat.sh'
+alias reload='source ~/.cliosrc'
+alias cliosrc='nano ~/.cliosrc'
+alias cliosconf='nano ~/.clios.toml'
+
+# ============================================================================
+# CARREGAR PLUGINS RHAI
+# ============================================================================
+
+source ~/.clios_plugins/utils.rhai
+source ~/.clios_plugins/git_helpers.rhai
+source ~/.clios_plugins/dev_tools.rhai
+
+# ============================================================================
+# MENSAGEM DE BOAS-VINDAS
+# ============================================================================
+
+echo ""
+echo "   Clios Shell v1.0.0 carregado!"
+echo "   Comandos: help | sysinfo | gitstat | backup"
+echo ""
+
+# ============================================================================
+# FIM DA CONFIGURAÇÃO
+# ============================================================================

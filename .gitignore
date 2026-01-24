@@ -1,1 +1,25 @@
+# Build artifacts
 /target
+
+# Temporary files
+*.swp
+*.swo
+*~
+.swp
+
+# Log files
+log.txt
+history.txt
+src/history.txt
+
+# Test output files
+teste.txt
+
+# IDE/Editor specific
+.vscode/
+.idea/
+*.iml
+
+# OS specific
+.DS_Store
+Thumbs.db

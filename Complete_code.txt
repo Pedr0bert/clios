@@ -1,0 +1,2161 @@
+//! # Clios Shell (Command Line Interface & Operating System Shell)
+//! # Clios Shell - Arquivo Principal
+//!
+//! Bem-vindo à documentação oficial da **Clios**, uma shell híbrida desenvolvida em Rust.
+//!
+//! ## Funcionalidades Principais:
+//! * **Interatividade:** Prompt rico com histórico e autocomplete (via `rustyline`).
+//! * **Scripting:** Suporte nativo à linguagem Rhai para scripts complexos.
+//! * **Job Control:** Gerenciamento de processos Unix (bg, fg, signals) via `nix`.
+//! * **Parsing:** Suporte a pipes `|`, redirecionamento `>` e lógica `&&`.
+
+//!
+//! Este projeto foi construído seguindo uma jornada de 11 Níveis de complexidade de Sistemas Operacionais.
+//!
+//! ---
+//!
+//! ## 🗺️ O Roadmap de Evolução (Níveis 1 a 11)
+//!
+//! A construção da Clios seguiu uma progressão lógica, partindo de um simples executor de comandos
+//! para uma Shell de sistema completa.
+//!
+//! ### Fase 1: A Fundação (O Básico)
+//! * **Nível 1 (Hello World):** Criação do loop REPL (Read-Eval-Print Loop) básico.
+//! * **Nível 2 (Input):** Integração com `rustyline` para setinhas, histórico e edição de linha.
+//! * **Nível 3 (Persistência):** Salvamento automático do histórico em `~/.clios_history`.
+//!
+//! ### Fase 2: O Sistema Operacional (Gerenciamento de Estado)
+//! * **Nível 4 (Builtins):** Implementação de comandos internos que alteram o estado da shell:
+//!     * `cd`: Altera o diretório atual do processo pai.
+//!     * `exit`: Encerra a shell graciosamente.
+//! * **Nível 5 (Job Control - O Grande Desafio):**
+//!     * Uso da crate `nix` para chamadas de sistema POSIX (`fork`, `exec`, `signals`).
+//!     * Implementação de processos em Background (`command &`).
+//!     * Controle de terminal (`tcsetpgrp`) para gerenciar quem recebe o `Ctrl+C`.
+//!     * Comandos `fg` (Foreground) e suporte a suspensão (`Ctrl+Z`).
+//!
+//! ### Fase 3: A Inteligência (Scripting & Lógica)
+//! * **Nível 6 (Scripting Híbrido):**
+//!     * Integração do motor **Rhai** (Embedded Scripting Language).
+//!     * Criação de funções ponte (`shell_exec`, `input`) permitindo scripts `.rhai` que controlam o Linux.
+//!     * Proteção contra falhas críticas (`Panic Catching`).
+//! * **Nível 6.5 (Modo Interativo):** Criação de um REPL dedicado para Rhai (`rhai>`).
+//! * **Nível 10 (Smart Parsing):**
+//!     * Implementação de lógica condicional `&&`.
+//!     * Parser contextual que respeita aspas (não quebra strings que contêm `&&`).
+//!
+//! ### Fase 4: UX & Encanamento (Polimento Profissional)
+//! * **Nível 7 (Git Aware):** O prompt detecta repositórios Git e mostra a branch atual.
+//! * **Nível 8 (Status Codes):** Feedback visual de erro (seta vermelha) baseado no Exit Code.
+//! * **Nível 9 (I/O Plumbing):**
+//!     * Redirecionamento de arquivos: `>` (Create), `>>` (Append).
+//!     * Redirecionamento de erros: `2>`, `2>>`.
+//!     * **Pipes:** Encanamento de processos via memória (`|`).
+//! * **Nível 10 (Expansão de Ambiente):**
+//!     * Variáveis: `$HOME`, `$USER`, `${VAR}`.
+//!     * Tilde: `~` expande para `/home/user`.
+//!     * Globs: `*.rs` expande para lista de arquivos.
+//!
+//! ### Fase 5: Identidade (Customização)
+//! * **Nível 11 (Configuração TOML):**
+//!     * Uso de `serde` e `toml` para ler configurações de `~/.clios.toml`.
+//!     * Permite customizar cores, símbolos do prompt e comportamento do histórico.
+//!
+//! ---
+//!
+//! ## 🏗️ Arquitetura do Sistema
+//!
+//! O fluxo de execução de um comando na Clios segue estas etapas:
+//!
+//! 1. **Input:** O `rustyline` captura a linha digitada.
+//! 2. **Config:** A shell consulta a `CliosConfig` para desenhar o prompt.
+//! 3. **Parser Lógico:** A linha é dividida por operadores `&&` (respeitando aspas).
+//! 4. **Expansão:**
+//!    - Aliases são resolvidos.
+//!    - Subshells `$()` são executadas e capturadas.
+//!    - Variáveis de ambiente e Globs são expandidos.
+//! 5. **Decisão de Execução:**
+//!    - É Script Rhai? -> Envia para `rhai_engine`.
+//!    - É Builtin (`cd`)? -> Executa internamente.
+//!    - É Binário (`ls`)? -> Cria processo filho (`Command::spawn` ou `fork`).
+//!
+//! ---
+//!
+//! ##  Como Usar
+//!
+//! ```bash
+//! # Modo Interativo
+//! clios
+//!
+//! # Executar Script
+//! clios script.rhai
+//!
+//! # Comando Único
+//! clios -c "echo Hello World"
+//! ```
+
+// ... AQUI COMEÇAM OS SEUS IMPORTS (use std::env; etc) ...
+// --- STANDARD LIBRARY (STD) ---
+// Ferramentas básicas do Rust para interagir com o sistema operacional.
+use std::env;                             // Variáveis de ambiente ($HOME, $PATH)
+use std::fs::{File, OpenOptions};         // Manipulação de arquivos (para redirecionamento >)
+use std::io::{BufRead, BufReader};        // Leitura eficiente de arquivos (scripts e configs)
+use std::path::Path;                      // Manipulação de caminhos de diretório
+use std::process::{Command, Stdio, Child}; // Criação e controle de processos filhos
+use std::borrow::Cow;                     // "Clone on Write" (otimização de strings para o prompt)
+use std::collections::HashMap;            // Estrutura chave-valor para guardar os Aliases
+use std::fs;                          // Operações de sistema de arquivos (verificar existência)    
+// --- EXTERNAL CRATES ---
+
+// Biblioteca para encontrar executáveis no PATH do sistema (como o comando 'which' do Linux)
+use which::which;
+
+// Biblioteca para expansão de padrões de arquivo (ex: *.rs, src/*)
+use glob::glob;
+
+// --- SCRIPTING ENGINE (RHAI) ---
+// O cérebro lógico da shell. Permite criar scripts, funções e automação.
+use rhai::{Engine, Scope, EvalAltResult, AST}; 
+
+// --- SYSTEM CALLS & JOB CONTROL (NIX) ---
+// Acesso de baixo nível a APIs Unix/Linux. Essencial para o Nível 5 (Job Control).
+use nix::sys::signal::{self, Signal, SigHandler}; // Manipulação de sinais (Ctrl+C, Ctrl+Z)
+use nix::unistd::{self, Pid};                     // Identificação de processos e Fork
+use nix::sys::wait::{self, WaitStatus, WaitPidFlag}; // Espera de processos filhos
+
+// --- USER INTERFACE (RUSTYLINE) ---
+// Fornece a experiência de linha de comando "moderna" (setinhas, home, end, histórico).
+use rustyline::error::ReadlineError;
+use rustyline::{Helper, Hinter, Validator, Editor};
+use rustyline::completion::{Completer, Pair}; // Autocomplete de arquivos (Tab)
+use rustyline::history::DefaultHistory;       // Gerenciamento do arquivo history.txt
+use rustyline::hint::HistoryHinter;           // Sugestão cinza baseada no histórico
+use rustyline::highlight::{Highlighter, CmdKind}; // Cores no terminal
+use rustyline::Context;                  // Contexto da linha atual
+
+// --- IMPORTS NIVEL 11 ---
+use serde::Deserialize;
+use std::io::Read; // Para ler o arquivo todo numa string  
+use chrono::Local; // Para timestamps no histórico
+// --- ESTRUTURAS DE DADOS ---
+
+// -----------------------------------------------------------------------------
+// MÓDULO DE CONFIGURAÇÃO (TOML)
+// -----------------------------------------------------------------------------
+
+/// Configurações visuais do Prompt de comando.
+///
+/// Esta estrutura mapeia a seção `[prompt]` do arquivo de configuração `.clios.toml`.
+/// Permite que o usuário personalize cores, símbolos e informações exibidas.
+#[derive(Debug, Deserialize, Clone)]
+struct ConfigPrompt {
+    /// O símbolo exibido no final do prompt (ex: `>`, `$`, `➜`, ``).
+    /// * Padrão: `>`
+    symbol: Option<String>,
+
+    /// A cor do símbolo e do separador.
+    /// * Valores aceitos: "red", "green", "blue", "purple", "cyan", "yellow".
+    /// * Padrão: "blue"
+    color: Option<String>,
+
+    /// Cores específicas para diferentes partes do prompt.
+    /// * Padrão: None (usa a cor geral definida em `color`)
+    /// Cor do usuário (user@host) 
+    path_color: Option<String>,   // Cor do caminho (/mnt/c/...)
+    /// Cor do símbolo (setinha >)
+    symbol_color: Option<String>, // Cor da setinha (>)
+
+    /// Define se deve mostrar a branch atual do Git.
+    /// * Padrão: `true`
+    show_git: Option<bool>,
+}
+
+// --- NÍVEL 15.5: Leitor de Versões ---
+
+// Struct para ler Cargo.toml
+#[derive(serde::Deserialize)]
+struct CargoToml {
+    package: CargoPackage,
+}
+#[derive(serde::Deserialize)]
+struct CargoPackage {
+    version: String,
+}
+
+// Struct para ler package.json
+#[derive(serde::Deserialize)]
+struct PackageJson {
+    version: String,
+}
+
+// --- Suporte a Python ---
+
+#[derive(serde::Deserialize)]
+struct PyProjectToml {
+    project: Option<PyProjectSection>,
+    tool: Option<PyToolSection>,
+}
+
+#[derive(serde::Deserialize)]
+struct PyProjectSection {
+    version: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct PyToolSection {
+    poetry: Option<PyPoetrySection>,
+}
+
+#[derive(serde::Deserialize)]
+struct PyPoetrySection {
+    version: Option<String>,
+}
+
+// Estrutura para representar um "bloco" colorido do prompt
+struct PowerlineSegment {
+    text: String,
+    bg: String, // Código de cor ANSI do fundo (ex: "218")
+    fg: String, // Código de cor ANSI do texto (ex: "0" para preto)
+}
+/// Configurações do histórico de comandos.
+///
+/// Esta estrutura mapeia a seção `[history]` do arquivo `.clios.toml`.
+#[derive(Debug, Deserialize, Clone)]
+struct ConfigHistory {
+    /// Nome do arquivo onde o histórico será salvo na pasta HOME.
+    /// * Padrão: `.clios_history`
+    file: Option<String>,
+
+    /// Número máximo de comandos a serem lembrados.
+    /// * Padrão: `1000`
+    max_entries: Option<usize>,
+}
+
+/// Configurações de cores para o realce de sintaxe (Syntax Highlighting).
+///
+/// Mapeia a seção `[syntax]` do arquivo `.clios.toml`.
+/// Define as cores usadas enquanto o usuário digita um comando.
+#[derive(Debug, Deserialize, Clone)]
+struct ConfigSyntax {
+    /// Cor para comandos válidos (encontrados no sistema ou builtins).
+    /// * Padrão: "green"
+    valid_cmd: Option<String>,
+    
+    /// Cor para comandos inválidos (não encontrados).
+    /// * Padrão: "red"
+    invalid_cmd: Option<String>, 
+}
+/// A Configuração Raiz (Root) da Clios Shell.
+///
+/// Esta é a estrutura principal que representa o arquivo `~/.clios.toml` inteiro.
+/// O `serde` lê o arquivo e preenche estes campos automaticamente.
+///
+/// # Exemplo de Arquivo `.clios.toml`
+/// ```toml
+/// [prompt]
+/// symbol = "➜"
+/// color = "purple"
+///
+/// [history]
+/// max_entries = 5000
+/// ```
+#[derive(Debug, Deserialize, Clone)]
+struct CliosConfig {
+    /// Configurações da seção `[prompt]`.
+    prompt: Option<ConfigPrompt>,
+    
+    /// Configurações da seção `[history]`.
+    history: Option<ConfigHistory>,
+
+    /// Configurações da seção `[syntax]`.
+    syntax: Option<ConfigSyntax>,
+
+    theme: Option<String>,
+}
+
+impl CliosConfig {
+    /// Retorna a configuração padrão (Default) caso o arquivo não exista.
+    ///
+    /// # Valores Padrão
+    /// * **Prompt:** Símbolo `> `, Cor `blue`, Git `true`.
+    /// * **History:** Arquivo `.clios_history`, 1000 entradas.
+    fn default() -> Self {
+        Self {
+            prompt: Some(ConfigPrompt {
+                symbol: Some("> ".to_string()),
+                color: Some("blue".to_string()),
+                show_git: Some(true),
+                path_color: None,
+                symbol_color: None,
+            }),
+            history: Some(ConfigHistory {
+                file: Some(".clios_history".to_string()),
+                max_entries: Some(1000),
+            }),
+            syntax: Some(ConfigSyntax {
+                valid_cmd: Some("green".to_string()),
+                invalid_cmd: Some("red".to_string()),
+            }),
+            theme: Some("powerline".to_string()), 
+        }
+    }
+}
+
+/// # CliosHelper (O Cérebro Visual)
+///
+/// Esta estrutura é exigida pelo `rustyline` para gerenciar a interação com o usuário.
+/// Ela agrupa todas as funcionalidades de "UX" (User Experience) do terminal.
+///
+/// ## Funcionalidades:
+/// * **Completer:** Autocomplete de arquivos quando aperta TAB.
+/// * **Hinter:** Sugestão cinza baseada no histórico.
+/// * **Highlighter:** Colore o comando enquanto você digita (Verde/Vermelho).
+#[derive(Helper, Hinter, Validator)]
+struct CliosHelper {
+
+    /// O sugestor baseado no histórico (HistoryHinter).
+    #[rustyline(Hinter)]
+    hinter: HistoryHinter,
+
+    /// Armazena a versão colorida do prompt (com códigos ANSI).
+    /// A anotação `#[rustyline(Ignore)]` diz para o rustyline não tentar completar
+    /// ou validar esse campo, ele é apenas para exibição.
+    #[rustyline(Ignore)]
+    colored_prompt: String,
+    
+    /// Cores para comandos válidos e inválidos.
+    /// Usado na função de highlight.
+    #[rustyline(Ignore)]
+    color_valid: String,   // Guarda o código ANSI (ex: \x1b[32m)
+    #[rustyline(Ignore)]
+    color_invalid: String, // Guarda o código ANSI (ex: \x1b[31m)
+}
+
+/// Implementação do traço `Highlighter` para colorir o texto.
+impl Highlighter for CliosHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, default: bool) -> Cow<'b, str> {
+        if default { Cow::Borrowed(&self.colored_prompt) } else { Cow::Borrowed(prompt) }
+    }
+
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        let input = line.trim();
+        if input.is_empty() { return Cow::Borrowed(line); }
+        let first_word = input.split_whitespace().next().unwrap_or("");
+        
+        let is_valid = matches!(first_word, "cd" | "exit" | "pwd" | "alias" | "rhai" | "fg" | "export") || which(first_word).is_ok();
+
+        if is_valid {
+            // USA A COR CONFIGURADA DE SUCESSO
+            Cow::Owned(format!("{}{}\x1b[0m", self.color_valid, line)) 
+        } else {
+            // USA A COR CONFIGURADA DE ERRO
+            Cow::Owned(format!("{}{}\x1b[0m", self.color_invalid, line)) 
+        }
+    }
+
+    fn highlight_char(&self, _line: &str, _pos: usize, _forced: CmdKind) -> bool { true }
+}
+
+/// # CliosShell (O Coração Lógico)
+///
+/// Esta estrutura mantém o **Estado Global** da sessão da shell.
+/// Diferente do Helper (que cuida da tela), aqui ficam os dados que precisam
+/// persistir entre um comando e outro.
+struct CliosShell {
+    /// Mapa de apelidos (Aliases). Ex: "update" -> "sudo apt update".
+    aliases: HashMap<String, String>,
+
+    /// O Motor (Engine) da linguagem de script Rhai.
+    /// Ele sabe *como* compilar e executar scripts.
+    rhai_engine: Engine, 
+
+    /// O Escopo (Scope) da linguagem Rhai.
+    /// Ele guarda *os dados* dos scripts (variáveis, constantes).
+    /// O tempo de vida `'static` indica que ele é dono dos próprios dados.
+    rhai_scope: Scope<'static>,
+
+    /// O Código de Saída (Exit Code) do último comando executado.
+    /// * `0`: Sucesso.
+    /// * `!= 0`: Erro (ex: 127 = comando não encontrado).
+    /// Fundamental para a lógica de `&&` e `||`.
+    last_exit_code: i32, 
+
+    /// Armazena o caminho do diretório anterior.
+    /// Usado para implementar o comando `cd -`.
+    previous_dir: Option<std::path::PathBuf>, 
+
+    /// Configurações carregadas do arquivo TOML (ou padrões).
+    /// Disponível para toda a aplicação consultar cores e preferências.
+    config: CliosConfig, // 
+
+    // --- NOVO CAMPO NIVEL 12 ---
+    // Guarda a "Árvore de Sintaxe Abstrata" do script de init.
+    // É aqui que vivem as funções 'bom_dia', 'soma', etc.
+    /// AST do script de inicialização (se houver).
+    /// Permite reutilizar o código compilado sem recompilar toda vez.
+    /// Se `None`, significa que não há script de init carregado.
+    plugin_ast: Option<AST>,
+}
+
+impl CliosShell {
+    /// Construtor: Inicializa a Shell e configura o motor de Script (Rhai).
+    fn new() -> Self {
+        // 1. Inicializa o motor Rhai APENAS UMA VEZ
+        // O Engine é pesado, então criamos ele no início e reutilizamos.
+        let mut engine = Engine::new();
+
+        // --- INTEGRAÇÃO RUST <-> RHAI ---
+        
+        // Registra a função 'shell_exec' dentro do Rhai.
+        // Isso permite que scripts .rhai executem comandos do sistema.
+        // Exemplo no script: shell_exec("ls -la");
+        // Substitua o registro antigo por este:
+        engine.register_fn("shell_exec", |cmd_str: &str| -> rhai::Map {
+            let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+            let mut map = rhai::Map::new();
+
+            if parts.is_empty() {
+                map.insert("success".into(), false.into());
+                return map;
+            }
+        
+            match std::process::Command::new(parts[0]).args(&parts[1..]).output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+                    // A MÁGICA: Mesclamos os dois em uma única string para o script
+                    let combined = format!("{}{}", stdout, stderr).trim().to_string();
+                
+                    map.insert("success".into(), output.status.success().into());
+                    map.insert("output".into(), combined.into()); // Usaremos 'output' no script
+                    map
+                },
+                Err(e) => {
+                    map.insert("success".into(), false.into());
+                    map.insert("output".into(), e.to_string().into());
+                    map
+                }
+            }
+        });
+        // --- NÍVEL 14: UI WIDGETS (INQUIRE) ---
+
+        // 1. Confirmação (Sim/Não)
+        // Uso no Rhai: let resp = confirm("Deseja formatar o PC?");
+        engine.register_fn("confirm", |prompt: &str| -> bool {
+            match inquire::Confirm::new(prompt)
+                .with_default(false)
+                .prompt() {
+                    Ok(true) => true,
+                    Ok(false) => false,
+                    Err(_) => false, // Se der erro (Ctrl+C), assume Não
+                }
+        });
+
+        // 2. Menu de Seleção
+        // Uso no Rhai: let escolha = select("Qual linguagem?", ["Rust", "Python", "Go"]);
+        engine.register_fn("select", |prompt: &str, options: Vec<rhai::Dynamic>| -> String {
+            // Converte o Array do Rhai para Vec<String> do Rust
+            let items: Vec<String> = options.iter()
+                .map(|item| item.to_string())
+                .collect();
+
+            match inquire::Select::new(prompt, items).prompt() {
+                Ok(choice) => choice,
+                Err(_) => String::new(), // Retorna vazio se cancelar
+            }
+        });
+        engine.register_fn("input", |prompt: &str| -> String {
+             use std::io::{self, Write};
+             print!("{}", prompt);
+             let _ = io::stdout().flush();
+             
+             let mut buffer = String::new();
+             let _ = io::stdin().read_line(&mut buffer);
+             buffer.trim().to_string()
+        });
+
+        // --- NÍVEL 16: Conectividade (CLPM) ---
+        
+        // 1. Função HTTP GET (Para baixar scripts)
+        engine.register_fn("http_get", |url: &str| -> String {
+            // Se você escolheu a Opção 2 (rustls), isso funciona nativamente
+            match reqwest::blocking::get(url) {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        resp.text().unwrap_or_else(|_| "Erro: Corpo vazio".to_string())
+                    } else {
+                        format!("Erro HTTP: {}", resp.status())
+                    }
+                },
+                Err(e) => format!("Erro de Conexão: {}", e),
+            }
+        });
+
+        // 2. Função Salvar Arquivo (Para instalar o plugin)
+        engine.register_fn("save_file", |path: &str, content: &str| -> bool {
+             if let Some(parent) = std::path::Path::new(path).parent() {
+                 let _ = std::fs::create_dir_all(parent);
+             }
+             std::fs::write(path, content).is_ok()
+        });
+
+        let loaded_config = load_toml_config();
+
+        Self {
+            aliases: HashMap::new(),
+            rhai_engine: engine,      
+            rhai_scope: Scope::new(), 
+            plugin_ast: None,         // <--- INICIALIZAÇÃO DO NÍVEL 12
+            last_exit_code: 0,        
+            previous_dir: None,       
+            config: loaded_config,    
+        }
+    }
+
+    /// Executa o modo interativo dedicado ao Rhai (REPL).
+    /// Semelhante ao digitar `python` no terminal.
+    fn run_rhai_repl(&mut self) {
+        println!("Entrando no modo Rhai (Digite 'exit' para sair)");
+        
+        // Criamos um editor simples só para esse modo (sem histórico compartilhado com o shell principal)
+        let mut rl = rustyline::DefaultEditor::new().unwrap_or_else(|_| panic!("Falha ao iniciar REPL"));
+        
+        // Buffer para guardar comandos de várias linhas
+        let mut input_buffer = String::new();
+        let mut open_braces = 0; // Contador de chaves { } para suporte a blocos multiline
+
+        loop {
+            // Se o buffer está vazio, prompt normal. Se tem coisa pendente (ex: if aberto), prompt "..."
+            let prompt = if input_buffer.is_empty() { "rhai> " } else { "... " };
+
+            match rl.readline(prompt) {
+                Ok(line) => {
+                    let trimmed = line.trim();
+
+                    // Comando para sair
+                    if trimmed == "exit" && input_buffer.is_empty() {
+                        break;
+                    }
+
+                    // Lógica simples de multiline: conta { e }
+                    // Se abriu mais do que fechou, continua pedindo input na próxima linha
+                    open_braces += trimmed.matches('{').count();
+                    let closed = trimmed.matches('}').count();
+                    
+                    // Proteção para não ficar negativo
+                    if closed > open_braces {
+                        open_braces = 0; 
+                    } else {
+                        open_braces -= closed;
+                    }
+
+                    // Adiciona a linha ao buffer
+                    input_buffer.push_str(&line);
+                    input_buffer.push('\n');
+
+                    // Se todas as chaves estão fechadas, executa o código acumulado!
+                    if open_braces == 0 {
+                        let result = self.rhai_engine.eval_with_scope::<rhai::Dynamic>(
+                            &mut self.rhai_scope,
+                            &input_buffer
+                        );
+
+                        match result {
+                            Ok(val) => {
+                                // Só imprime se o retorno não for vazio "()"
+                                if val.type_name() != "()" {
+                                    println!("=> {}", val);
+                                }
+                            }
+                            Err(e) => println!("Erro: {}", e),
+                        }
+                        
+                        // Limpa o buffer para o próximo comando
+                        input_buffer.clear();
+                    }
+                }
+                Err(_) => break, // CTRL+C ou Erro sai do modo Rhai
+            }
+        }
+    }   
+
+    /// Lê o arquivo de configuração `~/.cliosrc` e executa linha por linha.
+    /// Possui verificação de sintaxe para evitar crashes na inicialização.
+    fn load_config(&mut self) {
+        if let Ok(home) = env::var("HOME") {
+            let config_path = Path::new(&home).join(".cliosrc");
+            if config_path.exists() {
+                if let Ok(file) = File::open(config_path) {
+                    let reader = BufReader::new(file);
+                    
+                    for (i, line) in reader.lines().enumerate() {
+                        if let Ok(l) = line {
+                            let l = l.trim();
+                            
+                            // Pula linhas vazias ou comentários
+                            if !l.is_empty() && !l.starts_with('#') {
+                                
+                                // --- TESTE DE SINTAXE ANTES DE EXECUTAR ---
+                                // Verifica se há aspas não fechadas que quebrariam o parser
+                                if shlex::split(l).is_none() {
+                                    eprintln!("\x1b[1;31m[ERRO CONFIG]\x1b[0m .cliosrc Linha {}: Aspas não fechadas.", i + 1);
+                                    eprintln!("--> Conteúdo: {}", l);
+                                    continue; // Pula essa linha estragada
+                                }
+
+                                self.process_input_line(l);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// O Cérebro da Execução: Processa uma linha de entrada bruta.
+    /// Ordem de Operações:
+    /// 1. Expansão de Subshells $()
+    /// 2. Divisão Lógica (&&)
+    /// 3. Expansão Recursiva de Aliases
+    /// 4. Delegação para execução
+    /// NÍVEL 12: Carregador de Plugins (Compilação Única)
+    /// Lê um arquivo .rhai, compila para AST e guarda na memória.
+    /// NÍVEL 12.5: Carregador Cumulativo
+    /// Agora ele SOMA o novo plugin aos existentes, em vez de substituir.
+    fn load_plugin(&mut self, path: &str) {
+        //println!("Compilando e mesclando plugin '{}'...", path);
+        
+        match self.rhai_engine.compile_file(path.into()) {
+            Ok(new_ast) => {
+                if let Some(ref mut existing_ast) = self.plugin_ast {
+                    // SE JÁ TEM PLUGINS: Soma o novo ao antigo (Merge)
+                    // O operador += combina as funções dos dois scripts
+                    *existing_ast += new_ast;
+                    //println!("Plugin mesclado com sucesso! Funções acumuladas.");
+                } else {
+                    // SE É O PRIMEIRO: Apenas define
+                    self.plugin_ast = Some(new_ast);
+                    //println!("Primeiro plugin carregado.");
+                }
+            }
+            Err(e) => eprintln!("Erro ao compilar plugin: {}", e),
+        }
+    }
+
+    /// NÍVEL 12: Tenta executar uma função do Plugin carregado.
+    /// Retorna `true` se a função existia e foi executada.
+    
+    fn try_execute_plugin(&mut self, cmd: &str, args: Vec<String>) -> bool {
+        if let Some(ast) = &self.plugin_ast {
+            let function_exists = ast.iter_functions().any(|f| f.name == cmd);
+
+            if function_exists {
+                // --- CORREÇÃO DO NÍVEL 12 ---
+                // Convertemos Vec<String> (Rust Puro) para Vec<Dynamic> (Rhai Array).
+                // Assim o script entende que recebeu uma lista de textos.
+                let rhai_args: Vec<rhai::Dynamic> = args.into_iter()
+                    .map(|s| rhai::Dynamic::from(s))
+                    .collect();
+
+                // Chamamos a função passando o Array inteiro como O PRIMEIRO argumento.
+                // Na visão do script: fn comando(lista_de_args)
+                let result = self.rhai_engine.call_fn::<rhai::Dynamic>(
+                    &mut self.rhai_scope,
+                    ast,
+                    cmd,
+                    (rhai_args,) 
+                );
+
+                match result {
+                    Ok(_) => return true,
+                    Err(e) => println!("Erro no Plugin (Função {}): {}", cmd, e),
+                }
+                return true; 
+            }
+        }
+        false
+    }
+    /// NÍVEL 17: Auto-Loader de Plugins
+    /// Varre a pasta ~/.clios_plugins e carrega todos os scripts .rhai automaticamente.
+    fn load_auto_plugins(&mut self) {
+        // 1. Localiza a pasta HOME
+        let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let plugins_dir = Path::new(&home).join(".clios_plugins");
+
+        // 2. Tenta ler o diretório
+        if let Ok(entries) = fs::read_dir(plugins_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                
+                // 3. Se for um arquivo e terminar em .rhai, carrega!
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rhai") {
+                    if let Some(path_str) = path.to_str() {
+                        self.load_plugin(path_str);
+                    }
+                }
+            }
+        }
+    }
+
+    fn process_input_line(&mut self, input: &str) {
+        // --- EXPANSÃO DE SUBSHELL ---
+        // Resolve comandos dentro de $() antes de qualquer outra coisa
+        let input_expanded = expand_subshells(input);
+
+        // 1. DIVIDE POR && (Nível Superior)
+        // Usa o parser inteligente que respeita aspas
+        let logical_parts = split_logical_and(&input_expanded);
+
+        for part in logical_parts {
+            // 2. EXPANSÃO DE ALIAS (String Level)
+            // Agora expandimos "update" para "sudo apt update && sudo apt upgrade..."
+            let expanded_part = expand_alias_string(&part, &self.aliases);
+
+            // 3. RECURSÃO MÁGICA
+            // Se a expansão mudou o texto E introduziu novos "&&" (comum em aliases complexos), 
+            // processamos essa nova string recursivamente.
+            if expanded_part != part && expanded_part.contains("&&") {
+                self.process_input_line(&expanded_part);
+                
+                // Se deu erro na recursão, para tudo (comportamento do &&)
+                if self.last_exit_code != 0 { break; }
+                continue;
+            }
+            
+            // Se não tem && novos, segue para execução normal do bloco
+            let exit_code = self.execute_single_command_block(&expanded_part);
+            self.last_exit_code = exit_code;
+
+            // Se houve erro, o && impede a execução do próximo comando
+            if exit_code != 0 {
+                break;
+            }
+        }
+    }
+
+    /// Executa um bloco de comando único (sem &&, mas pode ter Pipes |).
+    /// Responsável por: Parsing, Background (&), Rhai e Builtins.
+    fn execute_single_command_block(&mut self, input: &str) -> i32 {
+        // Divide por Pipes (|)
+        let commands_raw: Vec<&str> = input.split('|').collect();
+
+        // Caso Simples: Sem Pipes
+        if commands_raw.len() == 1 {
+            let raw_line = commands_raw[0].trim();
+            
+            // --- DETECÇÃO DE BACKGROUND ---
+            // Se termina com '&', rodamos em background
+            let background = raw_line.ends_with('&');
+            let clean_line = if background { raw_line[..raw_line.len()-1].trim() } else { raw_line };
+
+            // Tokenização (Divide a string em argumentos respeitando aspas)
+            let mut tokens = match shlex::split(clean_line) {
+                Some(t) => t,
+                None => { 
+                    eprintln!("\x1b[1;31m[ERRO SINTAXE]\x1b[0m Falha ao processar: '{}'", clean_line);
+                    return 1; 
+                }
+            };
+            
+            // --- TRATAMENTO RHAI ---
+            // Se for script Rhai inline (ex: rhai print(1))
+            if tokens.first().map(|s| s.as_str()) == Some("rhai") {
+                if let Some(idx) = clean_line.find("rhai") {
+                    let code_part = clean_line[idx + 4..].trim(); 
+                    tokens = vec!["rhai".to_string(), code_part.to_string()];
+                }
+            }
+
+            // --- EXPANSÕES FINAIS ---
+            if tokens.first().map(|s| s.as_str()) != Some("rhai") {
+                tokens = expand_variables(tokens); // $HOME, $USER
+                tokens = expand_tilde(tokens);     // ~/Docs
+                tokens = expand_globs(tokens);     // *.txt
+            }
+
+            if tokens.is_empty() { return 0; }
+            let cmd_name = tokens[0].clone();
+            let args = tokens[1..].to_vec(); // Argumentos para o plugin
+
+            // --- AQUI ESTÁ A MUDANÇA DO NÍVEL 12 ---
+            // ORDEM DE PRIORIDADE:
+            // 1. Plugin (Função Rhai carregada na memória)
+            // 2. Builtin (cd, exit, source...)
+            // 3. Binário (ls, grep...)
+
+            // 1. Tenta Plugin
+            if self.try_execute_plugin(&cmd_name, args) {
+                return 0; // Sucesso (assumimos 0 pois o Rhai tratou)
+            }
+
+            // Tenta rodar como comando interno (cd, exit, alias...)
+            if self.handle_builtin(&tokens) {
+                return 0; // Builtin assume sucesso
+            } else {
+                // Se não é builtin, é um programa externo
+                if background {
+                    execute_job_control(tokens, true);
+                    return 0; // Background retorna sucesso imediato
+                } else {
+                    // Executa programa normal (foreground)
+                    return execute_pipeline(vec![tokens]);
+                }
+            }
+        } else {
+            // Caso Complexo: Pipeline (cmd1 | cmd2 | cmd3)
+            let mut parsed_commands = Vec::new();
+            
+            for raw_cmd in commands_raw {
+                // CORREÇÃO NIVEL 11: 
+                // Usamos expand_alias_string ANTES de dividir os tokens.
+                // Isso permite que um alias dentro de um pipe se expanda corretamente.
+                let expanded_cmd = expand_alias_string(raw_cmd, &self.aliases);
+
+                let tokens = match shlex::split(&expanded_cmd) {
+                    Some(t) => t,
+                    None => { println!("Erro no pipe: aspas não fechadas"); return 1; }
+                };
+                
+                // Expansões restantes (Variáveis, Til, Globs)
+                // Note que removemos a chamada antiga 'self.expand_alias(&mut tokens)'
+                let tokens = expand_variables(tokens);
+                let tokens = expand_tilde(tokens);
+                let tokens = expand_globs(tokens);
+                
+                parsed_commands.push(tokens);
+            }
+            return execute_pipeline(parsed_commands);
+        }
+    }
+
+    
+
+
+    /// Executa comandos internos da Shell (Builtins).
+    /// Retorna `true` se o comando foi tratado, `false` se não era um builtin.
+    fn handle_builtin(&mut self, tokens: &[String]) -> bool {
+        if tokens.is_empty() { return false; }
+        
+        match tokens[0].as_str() {
+            "cd" => {
+                // Suporta: cd, cd path, cd -
+                let target = if let Some(arg) = tokens.get(1) {
+                    if arg == "-" {
+                        // cd - : Volta para o diretório anterior
+                        if let Some(prev) = &self.previous_dir {
+                            println!("{}", prev.display());
+                            Some(prev.clone())
+                        } else {
+                            println!("Erro: Nenhuma pasta anterior definida");
+                            None
+                        }
+                    } else {
+                        Some(Path::new(arg).to_path_buf())
+                    }
+                } else {
+                    // cd sozinho vai para $HOME
+                    env::var("HOME").ok().map(|p| Path::new(&p).to_path_buf())
+                };
+
+                if let Some(new_dir) = target {
+                    // Salva o diretório atual antes de mudar (para o próximo cd -)
+                    if let Ok(current) = env::current_dir() {
+                        self.previous_dir = Some(current);
+                    }
+
+                    if let Err(e) = env::set_current_dir(&new_dir) {
+                        eprintln!("cd: {}", e);
+                    }
+                }
+                true
+            }
+            "history" => {
+                // Lê o arquivo gerado pelo rustyline
+                if let Ok(file) = File::open("history.txt") {
+                    let reader = BufReader::new(file);
+                    for (i, line) in reader.lines().enumerate() {
+                        if let Ok(l) = line {
+                            println!("{:5}  {}", i + 1, l);
+                        }
+                    }
+                }
+                true
+            }
+            // --- NOVO COMANDO NÍVEL 12 ---
+            "source" | "load" => {
+                if let Some(path) = tokens.get(1) {
+                    self.load_plugin(path);
+                } else {
+                    println!("Uso: source <arquivo.rhai>");
+                }
+
+                true
+            }
+            "plugins" => {
+        if let Some(ast) = &self.plugin_ast {
+            println!("Comandos de Plugins Ativos:");
+            println!("----------------------------");
+            
+            // O iter_functions() nos permite ver tudo o que foi compilado nos .rhai
+            for func in ast.iter_functions() {
+                // Filtramos funções que começam com '_' (comumente usadas para lógica interna)
+                if !func.name.starts_with('_') {
+                    // Mostra o nome da função e quantos argumentos ela espera
+                    println!("  ➜ {} ({} args)", func.name, func.params.len());
+                }
+            }
+            println!("----------------------------");
+        } else {
+            println!("Nenhum plugin carregado na memória.");
+        }
+        true
+    }
+            "pwd" => {
+                if let Ok(path) = env::current_dir() { println!("{}", path.display()); }
+                true
+            }
+            "exit" => { 
+                std::process::exit(0); // Mata a shell
+            }
+            "alias" => {
+                // Exibe ou cria aliases
+                if tokens.len() < 2 {
+                    for (name, val) in &self.aliases {
+                        println!("{}='{}'", name, val);
+                    }
+                } else {
+                    let arg = tokens[1..].join(" ");
+                    if let Some((name, value)) = arg.split_once('=') {
+                        self.aliases.insert(name.to_string(), value.to_string());
+                    } else {
+                        println!("Erro: Use alias nome=valor");
+                    }
+                }
+                true
+            }
+            "rhai" => {
+                // Ponte entre Shell e o interpretador Rhai
+                let code = tokens.get(1).map(|s| s.as_str()).unwrap_or("").trim();
+                
+                if code.is_empty() {
+                    // rhai (sem args) -> Modo REPL
+                    self.run_rhai_repl();
+                } else {
+                    // rhai "print(1)" -> Execução One-Shot
+                    let result = self.rhai_engine.eval_with_scope::<rhai::Dynamic>(
+                        &mut self.rhai_scope,
+                        code
+                    );
+                    match result {
+                        Ok(valor) => {
+                            if valor.type_name() != "()" {
+                                println!("=> {}", valor);
+                            }
+                        }
+                        Err(e) => println!("Erro Rhai: {}", e),
+                    }
+                }
+                true 
+            }
+            "fg" => {
+                // Traz um processo de background para foreground (Nível 5)
+                if let Some(pid_str) = tokens.get(1) {
+                    if let Ok(pid_int) = pid_str.parse::<i32>() {
+                        let pid = Pid::from_raw(pid_int);
+
+                        // 1. Acorda o processo (SIGCONT)
+                        let _ = signal::kill(pid, Signal::SIGCONT);
+
+                        // 2. Dá o controle do terminal para ele (tcsetpgrp)
+                        let _ = unistd::tcsetpgrp(std::io::stdin(), pid);
+
+                        // 3. A Shell dorme e espera ele terminar ou pausar
+                        let _ = wait::waitpid(pid, Some(WaitPidFlag::WUNTRACED));
+
+                        // 4. O processo parou/morreu. A Shell pega o terminal de volta.
+                        let shell_pgid = unistd::getpid();
+                        let _ = unistd::tcsetpgrp(std::io::stdin(), shell_pgid);
+                    }
+                } else {
+                    println!("Uso: fg <PID>");
+                }
+                true
+            }
+            "export" => {
+                // Define variáveis de ambiente globais para a sessão
+                if tokens.len() < 2 {
+                    println!("Uso: export VAR=VALOR");
+                } else {
+                    let arg = tokens[1..].join(""); 
+                    if let Some((key, value)) = arg.split_once('=') {
+                        unsafe {std::env::set_var(key, value);}
+                    } else {
+                        println!("Erro: Use formato VAR=VALOR");
+                    }
+                }
+                true
+            }
+            _ => false, // Não era um builtin, deixa o executor lidar
+        }
+    }
+}
+
+impl Completer for CliosHelper {
+    type Candidate = Pair;
+
+    fn complete(&self, line: &str, pos: usize, _ctx: &Context) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let (start, path_to_complete) = extract_word(line, pos);
+        let mut matches = Vec::new();
+
+        // 1. Identifica diretório base e o que estamos digitando
+        // Se digitou "cd Des", dir=".", file_prefix="Des"
+        // Se digitou "cd src/ma", dir="src", file_prefix="ma"
+        let (dir, file_prefix) = if let Some(idx) = path_to_complete.rfind('/') {
+            (&path_to_complete[..idx+1], &path_to_complete[idx+1..])
+        } else {
+            ("", path_to_complete)
+        };
+
+        // Resolve o caminho real para ler o disco
+        let dir_path = if dir.is_empty() { ".".to_string() } else { dir.to_string() };
+        
+        // Tenta ler o diretório
+        if let Ok(entries) = fs::read_dir(&dir_path) {
+            for entry in entries.flatten() {
+                if let Ok(name) = entry.file_name().into_string() {
+                    // A MÁGICA DO SMART CASE:
+                    // Comparamos tudo em minúsculo (lowercase)
+                    if name.to_lowercase().starts_with(&file_prefix.to_lowercase()) {
+                        
+                        // Monta o resultado
+                        let replacement = format!("{}{}", dir, name); // ex: src/Main.rs
+                        
+                        // Adiciona na lista de sugestões
+                        matches.push(Pair {
+                            display: name,       // O que aparece na lista (Main.rs)
+                            replacement: replacement, // O que vai pra linha (src/Main.rs)
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok((start, matches))
+    }
+}
+
+// Função auxiliar para pegar a palavra que está sendo digitada (separa por espaços)
+fn extract_word(line: &str, pos: usize) -> (usize, &str) {
+    let line_before_cursor = &line[..pos];
+    if let Some(last_space) = line_before_cursor.rfind(char::is_whitespace) {
+        (last_space + 1, &line_before_cursor[last_space + 1..])
+    } else {
+        (0, line_before_cursor)
+    }
+}
+/// Converte um nome de cor legível (ex: "red") para seu código ANSI correspondente.
+///
+/// Esta função é usada para traduzir as configurações do usuário no arquivo TOML
+/// para os caracteres de escape que o terminal entende.
+///
+/// # Cores Suportadas
+/// * red, green, yellow, blue, purple, cyan, white.
+/// * Qualquer outra string retorna o código de reset/padrão.
+fn get_color_ansi(color_name: &str) -> String {
+    match color_name {
+        "red"     => "\x1b[31m".to_string(),
+        "green"   => "\x1b[32m".to_string(),
+        "yellow"  => "\x1b[33m".to_string(),
+        "blue"    => "\x1b[34m".to_string(),
+        "purple"  => "\x1b[35m".to_string(),
+        "cyan"    => "\x1b[36m".to_string(),
+        "white"   => "\x1b[37m".to_string(),
+        _         => "\x1b[0m".to_string(), // Default (sem cor)
+    }
+}
+// --- FUNÇÃO MAIN ---
+// O ponto de entrada do programa.
+// Retorna um Result do rustyline para tratar erros fatais de I/O na inicialização.
+fn main() -> rustyline::Result<()> {
+    // 1. Inicializa o estado da Shell
+    // Cria a struct CliosShell com o motor Rhai pronto.
+    let mut shell = CliosShell::new();
+    // NÍVEL 17: Carrega plugins automáticos da pasta ~/.clios_plugins
+    shell.load_auto_plugins();
+    // Carrega configurações do usuário (~/.cliosrc)
+    // Isso define aliases e roda comandos de inicialização antes de mostrar o prompt.
+    shell.load_config(); 
+
+    // --- BLOCO DE ARGUMENTOS DE LINHA DE COMANDO ---
+    // Verifica se o usuário passou argumentos (ex: clios script.rhai ou clios -c "ls")
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() > 1 {
+        // CASO A: Flag -c (Comando único)
+        // Útil para scripts externos chamarem o clios: `clios -c "echo oi"`
+        if args[1] == "-c" {
+            if args.len() > 2 {
+                let command = &args[2];
+                // Proteção contra crashes (Panic Catch) mesmo no modo não-interativo
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    shell.process_input_line(command);
+                }));
+            } else {
+                eprintln!("Erro: -c requer um comando entre aspas");
+                std::process::exit(1);
+            }
+            return Ok(()); // Sai do programa após executar
+        }
+        
+        // CASO B: Script Rhai (.rhai)
+        // Detecta pela extensão se é um script avançado
+        if args[1].ends_with(".rhai") {
+            println!("--- Executando Script Rhai ---");
+            if let Err(e) = run_rhai_script(&args[1]) {
+                eprintln!("Erro no script Rhai: {}", e);
+                std::process::exit(1);
+            }
+            return Ok(()); 
+        }
+
+        // CASO C: Script Shell comum (estilo Bash)
+        // Lê um arquivo de texto e executa linha por linha
+        let script_path = Path::new(&args[1]);
+        if let Ok(file) = File::open(script_path) {
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                if let Ok(l) = line {
+                    // Ignora linhas vazias e comentários (#)
+                    if !l.trim().is_empty() && !l.starts_with('#') {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            shell.process_input_line(&l);
+                        }));
+                    }
+                }
+            }
+            return Ok(());
+        } else {
+            eprintln!("Erro: Arquivo não encontrado '{}'", args[1]);
+            std::process::exit(1);
+        }
+    }
+    // --- [FIM DO BLOCO DE ARGUMENTOS] ---
+    
+    // 2. Configura Rustyline (Interface Interativa) - MODO SEGURO
+    
+    // Extrai configurações de histórico com fallback (se falhar, usa padrão)
+    let (hist_file, max_entries) = if let Some(h) = &shell.config.history {
+        (
+            h.file.as_deref().unwrap_or(".clios_history"),
+            h.max_entries.unwrap_or(1000)
+        )
+    } else {
+        (".clios_history", 1000) // Padrões se a seção [history] não existir
+    };
+
+    // Configura o Rustyline com o limite do usuário
+    let config = rustyline::Config::builder()
+        .auto_add_history(false) // Adicionamos manualmente após validação
+        .max_history_size(max_entries).unwrap()
+        .build();
+    // 1. Pega as cores do TOML (COM SEGURANÇA ANTICRASH)
+    // Usamos um 'if let' para verificar se a seção existe.
+    // Se existir, pegamos as cores. Se não, usamos os padrões.
+    let (valid_str, invalid_str) = if let Some(syntax) = &shell.config.syntax {
+        (
+            syntax.valid_cmd.as_deref().unwrap_or("green"),
+            syntax.invalid_cmd.as_deref().unwrap_or("red")
+        )
+    } else {
+        ("green", "red") // Defaults se a seção [syntax] não estiver no arquivo
+    };
+
+    // 2. Cria o Helper injetando as cores convertidas
+    let h = CliosHelper {
+        
+        hinter: HistoryHinter {},
+        colored_prompt: String::new(),
+        
+        // Passamos os códigos ANSI prontos
+        color_valid: get_color_ansi(valid_str),
+        color_invalid: get_color_ansi(invalid_str),
+    };
+    // Inicializa o Editor com nosso Helper customizado
+    let mut rl: Editor<CliosHelper, DefaultHistory> = Editor::with_config(config)?;
+    rl.set_helper(Some(h));
+
+    // Define o caminho do histórico
+    let history_path = env::var("HOME")
+        .map(|p| Path::new(&p).join(hist_file))
+        .unwrap_or_else(|_| Path::new(hist_file).to_path_buf());// Pega o HOME ou usa o nome simples
+
+    // Carrega o histórico de comandos anteriores
+    if rl.load_history(&history_path).is_err() { 
+        // Se falhar (primeira vez usando), mostra mensagem de boas-vindas
+        println!("Bem-vindo ao Clios Shell v1.0 (Final Release) "); 
+        println!("Digite 'create' para iniciar um projeto ou 'rhai' para scripts.");
+    }
+
+    // --- LOOP PRINCIPAL (REPL) ---
+    // Aqui é onde a mágica acontece: Lê -> Avalia -> Imprime -> Repete
+    // Variável de controle de tema (começa com o da config ou powerline)
+    // Variável de controle de tema (começa com o da config ou powerline)
+    let mut current_theme = shell.config.theme.clone().unwrap_or("powerline".to_string());
+
+    // --- LOOP PRINCIPAL ---
+    loop {
+        let final_prompt;
+        
+        if current_theme == "powerline" {
+            // --- OPÇÃO A: MODO POWERLINE (Novo) ---
+            let segments = get_powerline_segments(&shell);
+            let prompt_bar = build_powerline_prompt(segments);
+            // Prompt na mesma linha com seta verde
+            final_prompt = format!("{} \x1b[1;32m❯\x1b[0m ", prompt_bar); 
+
+        } else {
+            // --- OPÇÃO B: MODO CLÁSSICO CUSTOMIZÁVEL (Restaurado) ---
+            // Esta é a sua lógica original que lê o [prompt] do TOML
+            
+            let current_dir = env::current_dir().unwrap_or_default();
+            let dir_display = current_dir.display();
+
+            // 1. Pega configurações do usuário
+            let (symbol, default_color, path_color_cfg, symbol_color_cfg, show_git) = 
+                if let Some(p) = &shell.config.prompt {
+                    (
+                        p.symbol.as_deref().unwrap_or(">"),
+                        p.color.as_deref().unwrap_or("blue"),
+                        p.path_color.as_deref(),
+                        p.symbol_color.as_deref(),
+                        p.show_git.unwrap_or(true)
+                    )
+                } else {
+                    (">", "blue", None, None, true)
+                };
+
+            // 2. Resolve as Cores
+            let path_ansi = get_color_ansi(path_color_cfg.unwrap_or(default_color));
+            let arrow_ansi = get_color_ansi(symbol_color_cfg.unwrap_or(default_color));
+
+            // 3. Lógica do Git (só se estiver ativado)
+            let (_, git_color) = if show_git {
+                 if let Some(branch) = get_git_branch() {
+                    (format!(" ({})", branch), format!(" (\x1b[1;35m{}\x1b[0m)", branch))
+                } else {
+                    (String::new(), String::new())
+                }
+            } else {
+                (String::new(), String::new())
+            };
+
+            // 4. Monta a seta (verifica erro anterior)
+            let arrow_colored = if shell.last_exit_code == 0 {
+                format!("{}{}\x1b[0m ", arrow_ansi, symbol)
+            } else {
+                format!("\x1b[1;31m[{}]>\x1b[0m ", shell.last_exit_code)
+            };
+
+            // 5. Montagem Final do Prompt Clássico
+            // Formato: clios:/caminho (git)> 
+            final_prompt = format!(
+                "{}{}{}:{}{}\x1b[0m{}", 
+                "", // prefixo vazio
+                path_ansi, 
+                "clios", // ou user
+                dir_display, 
+                git_color,
+                arrow_colored
+            );
+        }
+
+        // --- FIM DA ESCOLHA DE TEMA ---
+
+        // Injeta no Rustyline
+        if let Some(helper) = rl.helper_mut() { 
+            helper.colored_prompt = final_prompt.clone(); 
+        }
+
+        match rl.readline(&final_prompt) {
+            Ok(line) => {
+                let input = line.trim();
+                if input.is_empty() { continue; }
+
+                // Comandos de troca de tema em tempo real
+                if input == "theme classic" {
+                    current_theme = "classic".to_string();
+                    continue;
+                }
+                if input == "theme powerline" {
+                    current_theme = "powerline".to_string();
+                    continue;
+                }
+
+                // Salva histórico
+                let _ = rl.add_history_entry(input);
+                let _ = rl.append_history(&history_path);
+
+                // Executa
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    shell.process_input_line(input);
+                }));
+                if let Err(_) = result { eprintln!("\n(!) Panic recuperado."); }
+            }
+            Err(ReadlineError::Interrupted) => { println!("CTRL-C"); continue; }
+            Err(ReadlineError::Eof) => { break; }
+            Err(_) => { break; }
+        }
+    }
+    // Salva o histórico no arquivo ao sair
+    rl.save_history(&history_path)?;
+    Ok(())
+}
+
+// --- FUNÇÕES UTILITÁRIAS ---
+// Funções auxiliares que não dependem do estado interno da Shell (stateless).
+
+/// Expansão Recursiva de Variáveis de Ambiente (Nível 10).
+///
+/// Varre cada token procurando por padrões `$VAR` ou `${VAR}` e substitui
+/// pelo valor real do sistema operacional. Funciona inclusive no meio de strings.
+///
+/// # Exemplo
+/// * Entrada: `echo Backup_$USER.tar.gz`
+/// * Saída: `echo Backup_pedro.tar.gz`
+fn expand_variables(tokens: Vec<String>) -> Vec<String> {
+    tokens.into_iter().map(|token| {
+        // Otimização: Se não tem '$', retorna o token original imediatamente
+        if !token.contains('$') {
+            return token;
+        }
+
+        let mut output = String::new();
+        let mut chars = token.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '$' {
+                // Início de uma variável.
+                // Detecta se é formato estendido ${VAR} ou simples $VAR
+                let mut var_name = String::new();
+                let mut is_bracketed = false;
+
+                if let Some(&'{') = chars.peek() {
+                    is_bracketed = true;
+                    chars.next(); // Consome '{'
+                }
+
+                // Lê o nome da variável (Letras, Números ou Underline)
+                // Ex: "HOME", "USER_ID", "VAR1"
+                while let Some(&next_c) = chars.peek() {
+                    if next_c.is_alphanumeric() || next_c == '_' {
+                        var_name.push(next_c);
+                        chars.next();
+                    } else {
+                        // Se encontrou um caractere inválido (ex: / ou .), acabou o nome.
+                        if is_bracketed && next_c == '}' {
+                            chars.next(); // Consome '}' final
+                        }
+                        break;
+                    }
+                }
+                
+                // Se extraiu um nome válido, busca no Sistema Operacional
+                if !var_name.is_empty() {
+                    if let Ok(val) = env::var(&var_name) {
+                        output.push_str(&val); // Sucesso: Substitui pelo valor
+                    } else {
+                        // Variável não existe? O padrão Bash é substituir por vazio ("").
+                        // Nós fazemos o mesmo (não fazemos nada aqui).
+                    }
+                } else {
+                    // Era apenas um "$" solto sem nome depois. Mantém literal.
+                    output.push('$');
+                }
+            } else {
+                output.push(c); // Caractere normal
+            }
+        }
+        output
+    }).collect()
+}
+
+/// Expansão de "Globs" (Curingas de Arquivo).
+///
+/// Utiliza a crate `glob` para transformar padrões como `*.rs` ou `src/*`
+/// em uma lista de arquivos reais do disco.
+///
+/// # Comportamento
+/// * Se encontrar arquivos: Substitui o token pela lista de arquivos.
+/// * Se NÃO encontrar: Mantém o token original (ex: `rm *.txt` falha se não houver txt).
+fn expand_globs(tokens: Vec<String>) -> Vec<String> {
+    let mut expanded_tokens = Vec::new();
+    for token in tokens {
+        // Só ativa o globbing se tiver caracteres mágicos
+        if token.contains('*') || token.contains('?') {
+            match glob(&token) {
+                Ok(paths) => {
+                    let mut found = false;
+                    for entry in paths {
+                        if let Ok(p) = entry {
+                            if let Some(s) = p.to_str() { 
+                                expanded_tokens.push(s.to_string()); 
+                                found = true; 
+                            }
+                        }
+                    }
+                    // Se o padrão não bateu com nada, mantém o original
+                    if !found { expanded_tokens.push(token); }
+                }
+                Err(_) => { expanded_tokens.push(token); }
+            }
+        } else { 
+            expanded_tokens.push(token); 
+        }
+    }
+    expanded_tokens
+}
+/// Analisa e processa operadores de redirecionamento de I/O (Nível 9).
+///
+/// Esta função percorre a lista de tokens procurando por operadores especiais
+/// de redirecionamento. Quando encontra, ela abre o arquivo correspondente
+/// e o remove da lista de argumentos do comando.
+///
+/// # Operadores Suportados
+/// * `>`   : Redireciona **STDOUT** (Sobrescreve o arquivo).
+/// * `>>`  : Redireciona **STDOUT** (Adiciona ao final do arquivo - Append).
+/// * `2>`  : Redireciona **STDERR** (Sobrescreve o arquivo).
+/// * `2>>` : Redireciona **STDERR** (Adiciona ao final do arquivo - Append).
+///
+/// # Retorno
+/// Retorna uma tupla `(Vec<String>, Option<File>, Option<File>)`:
+/// 1. **Argumentos Limpos:** O comando sem os símbolos de redirecionamento.
+/// 2. **Arquivo Saída:** O arquivo aberto para onde vai o stdout (se houver).
+/// 3. **Arquivo Erro:** O arquivo aberto para onde vai o stderr (se houver).
+fn parse_redirection(tokens: &[String]) -> (Vec<String>, Option<File>, Option<File>) {
+    let mut clean = Vec::new();    // Argumentos do comando (ex: "ls", "-l")
+    let mut stdout_file = None;    // Arquivo para > ou >>
+    let mut stderr_file = None;    // Arquivo para 2> ou 2>>
+    
+    // Usamos um iterador 'peekable' (que permite espiar o próximo item)
+    // mas aqui usamos apenas next() manual para consumir o nome do arquivo.
+    let mut iter = tokens.iter().peekable();
+    
+    while let Some(t) = iter.next() {
+        match t.as_str() {
+            // Saída Padrão (Overwrite): Abre com truncate=true (zera o arquivo)
+            ">" => if let Some(f) = iter.next() {
+                if let Ok(o) = OpenOptions::new().write(true).create(true).truncate(true).open(f) { 
+                    stdout_file = Some(o); 
+                }
+            },
+            // Saída Padrão (Append): Abre com append=true (mantém conteúdo antigo)
+            ">>" => if let Some(f) = iter.next() {
+                if let Ok(o) = OpenOptions::new().write(true).create(true).append(true).open(f) { 
+                    stdout_file = Some(o); 
+                }
+            },
+            // Saída de Erro (Overwrite) - Nível 9
+            "2>" => if let Some(f) = iter.next() {
+                if let Ok(o) = OpenOptions::new().write(true).create(true).truncate(true).open(f) { 
+                    stderr_file = Some(o); 
+                }
+            },
+            // Saída de Erro (Append) - Nível 9
+            "2>>" => if let Some(f) = iter.next() {
+                if let Ok(o) = OpenOptions::new().write(true).create(true).append(true).open(f) { 
+                    stderr_file = Some(o); 
+                }
+            },
+            // Token normal (não é operador): Adiciona na lista de execução
+            _ => clean.push(t.clone()),
+        }
+    }
+    (clean, stdout_file, stderr_file)
+}
+/// Executa uma "Pipeline" de comandos (ex: `ls | grep txt | wc -l`).
+///
+/// Esta é a função que realmente faz os programas rodarem. Ela gerencia:
+/// 1. **Pipes:** Conecta a saída de um comando na entrada do próximo.
+/// 2. **Redirecionamento:** Conecta arquivos (`>`, `2>`) se necessário.
+/// 3. **Exit Codes:** Captura se o comando deu certo ou errado.
+///
+/// # Como funciona (The Daisy Chain)
+/// Em um pipe `A | B | C`:
+/// * **A**: Stdin = Teclado, Stdout = Pipe(A->B)
+/// * **B**: Stdin = Pipe(A->B), Stdout = Pipe(B->C)
+/// * **C**: Stdin = Pipe(B->C), Stdout = Tela
+
+fn execute_pipeline(commands: Vec<Vec<String>>) -> i32 {
+    let mut prev_cmd: Option<Child> = None; // Guarda o processo anterior (para pegar o cano dele)
+    let mut final_exit_code = 0;
+
+    for (i, tokens) in commands.iter().enumerate() {
+        if tokens.is_empty() { continue; }
+        
+        // 1. Separa o comando dos redirecionamentos de arquivo
+        // Ex: ["ls", ">", "file.txt"] vira args=["ls"], outfile=Some(file.txt)
+        let (mut args, outfile, errfile) = parse_redirection(tokens);
+        
+        if args.is_empty() { continue; } // Proteção contra comando vazio
+        let cmd = args.remove(0);
+
+        // 2. Configuração do STDIN (De onde vem os dados?)
+        let stdin = if let Some(mut child) = prev_cmd { 
+            // Se existe um comando anterior, roubamos a saída dele para ser nossa entrada
+            Stdio::from(child.stdout.take().unwrap()) 
+        } else { 
+            // Se é o primeiro comando, lê do teclado
+            Stdio::inherit() 
+        };
+        
+        // 3. Configuração do STDOUT (Para onde vão os dados?)
+        let stdout = if let Some(f) = outfile { 
+            // Prioridade 1: Arquivo (>)
+            Stdio::from(f) 
+        } else if i < commands.len() - 1 { 
+            // Prioridade 2: Pipe para o próximo comando (|)
+            Stdio::piped() 
+        } else { 
+            // Prioridade 3: Tela (Se for o último comando)
+            Stdio::inherit() 
+        };
+
+        // 4. Configuração do STDERR (Para onde vão os erros?)
+        // Erros geralmente não passam pelo Pipe, eles vazam para a tela
+        // a menos que usemos '2>' para redirecionar explicitamente.
+        let stderr = if let Some(f) = errfile {
+            Stdio::from(f)
+        } else {
+            Stdio::inherit() // Mostra o erro na tela
+        };
+
+        // 5. Executa (Spawn)
+        // Cria o processo filho com as configurações de canais definidas acima.
+        match Command::new(&cmd).args(&args)
+            .stdin(stdin)
+            .stdout(stdout)
+            .stderr(stderr) 
+            .spawn() {
+            Ok(child) => prev_cmd = Some(child), // Sucesso: salva este filho como 'anterior' para o próximo loop
+            Err(e) => { 
+                eprintln!("Erro: '{}': {}", cmd, e); 
+                return 127; // Código padrão POSIX para "Command Not Found"
+            }
+        }
+    }
+
+    // 6. Espera Final
+    // Em um pipeline, a shell só espera o ÚLTIMO comando terminar.
+    // Os anteriores morrem naturalmente quando o pipe fecha ou quando terminam o trabalho.
+    if let Some(mut final_child) = prev_cmd { 
+        if let Ok(status) = final_child.wait() {
+            // Pega o código de saída (ex: 0 = Sucesso, 1 = Erro)
+            final_exit_code = status.code().unwrap_or(1);
+        }
+    }
+    
+    final_exit_code
+}
+/// Inicializa e executa um script Rhai externo (.rhai).
+///
+/// Diferente do modo interativo, esta função cria um motor "limpo" e novo.
+/// Isso garante que scripts rodem em um ambiente isolado, sem poluir
+/// ou depender das variáveis da sessão atual da shell.
+///
+/// # Funcionalidades Injetadas no Script
+/// Para que o script não seja inútil, injetamos duas funções nativas do Rust nele:
+/// 1. `shell_exec(cmd)`: Permite rodar comandos do sistema (ex: `ls`, `git`).
+/// 2. `input(prompt)`: Permite pedir dados ao usuário (interatividade).
+fn run_rhai_script(path: &str) -> Result<(), Box<EvalAltResult>> {
+    let mut engine = Engine::new();
+
+    engine.register_fn("shell_exec", |cmd_str: &str| -> rhai::Map {
+        let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+        let mut map = rhai::Map::new();
+
+        if parts.is_empty() {
+            map.insert("success".into(), false.into());
+            return map;
+        }
+
+        match std::process::Command::new(parts[0]).args(&parts[1..]).output() {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+                // A MÁGICA: Mesclamos os dois em uma única string para o script
+                let combined = format!("{}{}", stdout, stderr).trim().to_string();
+
+                map.insert("success".into(), output.status.success().into());
+                map.insert("output".into(), combined.into()); // Usaremos 'output' no script
+                map
+            },
+            Err(e) => {
+                map.insert("success".into(), false.into());
+                map.insert("output".into(), e.to_string().into());
+                map
+            }
+        }
+    });
+
+    // 2. Registra 'input'
+    // Permite criar wizards interativos (ex: "Qual o nome do projeto?").
+    engine.register_fn("input", |prompt: &str| -> String {
+        use std::io::{self, Write};
+        print!("{}", prompt);
+        let _ = io::stdout().flush(); // Garante que o texto apareça antes de travar no read_line
+        
+        let mut buffer = String::new();
+        let _ = io::stdin().read_line(&mut buffer);
+        buffer.trim().to_string()
+    });
+
+    // 3. Carrega e roda o arquivo do disco
+    engine.run_file(path.into())?;
+
+    Ok(())
+}
+
+/// Expansão de "Command Substitution" ou Subshell `$()`.
+///
+/// Detecta padrões `$(comando)` dentro de uma string, executa o comando ocultamente,
+/// captura a saída (STDOUT) e substitui o padrão pelo resultado.
+///
+/// # Exemplo
+/// * Entrada: `echo Hoje é $(date)`
+/// * Execução: Roda `date`, captura "Sáb Dez 14..."
+/// * Saída: `echo Hoje é Sáb Dez 14...`
+///
+/// # Algoritmo (Parentheses Counting)
+/// Diferente de Regex simples, este parser conta o nível de aninhamento.
+/// Isso permite comandos complexos como: `echo $(echo $(date))`
+
+fn expand_subshells(input: &str) -> String {
+    let mut output = String::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '$' {
+            // Verifica se o próximo char é '('
+            if let Some(&'(') = chars.peek() {
+                chars.next(); // Consome o '(' inicial
+                
+                // Captura o conteúdo interno
+                let mut nested = 0; // Contador de aninhamento
+                let mut inner = String::new();
+                let mut closed = false;
+
+                // Loop para capturar tudo até o parêntese de fechamento correspondente
+                while let Some(inner_c) = chars.next() {
+                    if inner_c == '(' {
+                        nested += 1; // Aprofunda um nível
+                        inner.push(inner_c);
+                    } else if inner_c == ')' {
+                        if nested > 0 {
+                            nested -= 1; // Volta um nível
+                            inner.push(inner_c);
+                        } else {
+                            closed = true; // Achou o fechamento final!
+                            break; 
+                        }
+                    } else {
+                        inner.push(inner_c);
+                    }
+                }
+
+                if closed {
+                    // Executa o comando capturado e coloca o resultado no lugar
+                    let result = execute_and_capture(&inner);
+                    output.push_str(&result);
+                } else {
+                    // Se o loop acabou e não fechou, devolve o texto original
+                    // (Significa que era uma string quebrada ou inválida)
+                    output.push_str("$(");
+                    output.push_str(&inner);
+                }
+                continue;
+            }
+        }
+        output.push(c);
+    }
+    output
+}
+
+/// Executa um comando e captura sua saída (STDOUT) como string.
+/// Esta função é usada pela `expand_subshells` para resolver `$(...)`.
+///
+/// # O Truque de Mestre (Self-Execution)
+/// Se o comando dentro do subshell for um script `rhai` (ex: `$(rhai print(1+1))`),
+/// a Clios não tenta rodar isso internamente. Em vez disso:
+/// 1. Ela descobre onde está seu próprio binário (`env::current_exe`).
+/// 2. Ela cria um **novo processo filho** de si mesma.
+/// 3. Passa o código Rhai via flag `-c`.
+///
+/// Isso garante isolamento total e evita conflitos de memória no Rhai Engine.
+fn execute_and_capture(cmd_line: &str) -> String {
+    let tokens = match shlex::split(cmd_line) {
+        Some(t) => t,
+        None => return String::new(),
+    };
+    if tokens.is_empty() { return String::new(); }
+
+    let prog = &tokens[0];
+    let args = &tokens[1..];
+
+    // TRUQUE DE MESTRE: Recursão de Processo
+    if prog == "rhai" {
+        if let Ok(myself) = env::current_exe() {
+            let output = Command::new(myself)
+                .arg("-c") // Chama: clios -c "codigo rhai"
+                .arg(cmd_line)
+                .output();
+
+            return match output {
+                Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                Err(_) => String::new(),
+            };
+        }
+    }
+
+    // Execução normal (ls, date, git...)
+    let output = Command::new(prog)
+        .args(args)
+        .output();
+
+    match output {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        Err(_) => String::new(),
+    }
+}
+
+/// Execução de baixo nível com controle total de Processos (Job Control - Nível 5).
+///
+/// Diferente do `execute_pipeline` (que usa a std lib), esta função usa `nix` para
+/// chamar `fork` e `exec` manualmente. Isso é necessário para manipular
+/// **Process Groups** e definir quem é o "dono" do terminal.
+///
+/// # A Dança do Terminal (Terminal Handoff)
+/// Para que o `Ctrl+C` vá para o processo certo, precisamos transferir a posse
+/// do terminal (STDIN) da Shell para o Processo Filho.
+///
+/// 1. **Shell:** Ignora `SIGTTOU` (para não ser suspensa ao mexer no terminal).
+/// 2. **Fork:** Cria uma cópia do processo.
+/// 3. **Pai & Filho:** Ambos tentam setar o `setpgid` (para evitar race conditions).
+/// 4. **Pai:** Dá o terminal pro filho (`tcsetpgrp`) e espera (`waitpid`).
+/// 5. **Pai:** Quando o filho morre/para, pega o terminal de volta.
+
+fn execute_job_control(tokens: Vec<String>, background: bool) {
+    // Segurança: Ignorar SIGTTOU na shell para não sermos pausados ao mudar o dono do terminal
+    unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigIgn) }.unwrap();
+
+    // O "Fork" divide a linha do tempo em duas: Pai (Shell) e Filho (Comando)
+    match unsafe { unistd::fork() } {
+        Ok(unistd::ForkResult::Parent { child, .. }) => {
+            // --- CÓDIGO DO PAI (SHELL) ---
+            let pgid = child; // O ID do grupo será o mesmo do PID do filho
+
+            // A DANÇA: Garante que o filho tenha seu próprio grupo
+            let _ = unistd::setpgid(child, pgid);
+
+            if !background {
+                // Se NÃO é background, dá o terminal para o filho
+                let _ = unistd::tcsetpgrp(std::io::stdin(), pgid);
+
+                // Espera o filho morrer ou pausar (WUNTRACED pega Ctrl+Z)
+                match wait::waitpid(child, Some(WaitPidFlag::WUNTRACED)) {
+                    Ok(WaitStatus::Stopped(_, _sig)) => {
+                        println!("\n[Job {}] Pausado (Ctrl+Z)", child);
+                    }
+                    Ok(WaitStatus::Signaled(_, sig, _)) => {
+                        println!("\n[Job {}] Morto pelo sinal: {:?}", child, sig);
+                    }
+                    _ => {} // Terminou normal
+                }
+
+                // O filho terminou/pausou. A Shell pega o controle de volta.
+                let shell_pgid = unistd::getpid();
+                let _ = unistd::tcsetpgrp(std::io::stdin(), shell_pgid);
+            } else {
+                // Se é background, apenas avisa o usuário e não espera
+                println!("[Background Job {}]", child);
+            }
+        }
+        Ok(unistd::ForkResult::Child) => {
+            // --- CÓDIGO DO FILHO (COMANDO) ---
+            let pid = unistd::getpid();
+            // A DANÇA: Filho também define seu grupo (segurança contra race condition)
+            let _ = unistd::setpgid(pid, pid);
+
+            if !background {
+                // Filho toma posse do terminal
+                let _ = unistd::tcsetpgrp(std::io::stdin(), pid);
+            }
+
+            // Restaura os sinais para o padrão (para que Ctrl+C funcione no filho)
+            unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigDfl) }.unwrap();
+            unsafe { signal::signal(Signal::SIGINT, SigHandler::SigDfl) }.unwrap();
+
+            // Substitui a imagem do processo atual pelo programa novo (exec)
+            use std::os::unix::process::CommandExt; 
+
+            let err = Command::new(&tokens[0])
+                .args(&tokens[1..])
+                .exec();
+
+            // Se o exec retornar, é porque deu erro (o programa não existe)
+            eprintln!("Erro ao executar '{}': {}", tokens[0], err);
+            std::process::exit(1);
+        }
+        Err(_) => println!("Fork falhou - Sistema sem recursos"),
+    }
+}
+
+/// Expansão do Til (`~`).
+///
+/// No Linux, `~` é um atalho para a pasta HOME do usuário.
+/// Esta função substitui tokens que começam com `~` pelo caminho absoluto.
+///
+/// # Exemplos
+/// * `cd ~` -> `cd /home/pedro`
+/// * `ls ~/Downloads` -> `ls /home/pedro/Downloads`
+fn expand_tilde(tokens: Vec<String>) -> Vec<String> {
+    // Tenta pegar a home do usuário. Se falhar, usa "/"
+    let home = env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    
+    tokens.into_iter().map(|t| {
+        if t == "~" {
+            home.clone() // "~" vira "/home/pedro"
+        } else if t.starts_with("~/") {
+            // "~/scripts" vira "/home/pedro/scripts"
+            // Remove o "~" (primeiro char) e cola a home no lugar
+            format!("{}{}", home, &t[1..]) 
+        } else {
+            t
+        }
+    }).collect()
+}
+
+/// Detecta a Branch do Git para o Prompt (Nível 7).
+///
+/// Executa `git branch --show-current` em um processo separado.
+/// O `stderr` é descartado para evitar mensagens de erro caso a pasta
+/// atual não seja um repositório git.
+fn get_git_branch() -> Option<String> {
+    let output = Command::new("git")
+        .arg("branch")
+        .arg("--show-current")
+        .stderr(Stdio::null()) // Silencia erros
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() {
+            return Some(branch);
+        }
+    }
+    None
+}
+
+/// Parser Lógico de `&&` com Contexto (Nível 10).
+///
+/// Esta função resolve o bug onde `echo "a && b"` era dividido incorretamente.
+/// Ela percorre a string caractere por caractere mantendo um **Estado Interno**
+/// para saber se está dentro de aspas ou não.
+///
+/// # Como funciona (State Machine)
+/// 
+/// 1. **Normal:** Procura por `&&`. Se achar, corta.
+/// 2. **Aspas Simples ('):** Ignora tudo até fechar a aspa.
+/// 3. **Aspas Duplas ("):** Ignora `&&`, mas ainda processa outras coisas se necessário.
+fn split_logical_and(input: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current_part = String::new();
+    
+    // Flags de Estado
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                // Inverte o estado de aspa simples se não estiver em aspa dupla
+                if !in_double_quote { in_single_quote = !in_single_quote; }
+                current_part.push(c);
+            }
+            '"' => {
+                // Inverte o estado de aspa dupla se não estiver em aspa simples
+                if !in_single_quote { in_double_quote = !in_double_quote; }
+                current_part.push(c);
+            }
+            '&' => {
+                // O PULO DO GATO:
+                // Só considera separador se NÃO estiver dentro de nenhuma aspa
+                if !in_single_quote && !in_double_quote {
+                    if let Some(&'&') = chars.peek() {
+                        // Achou "&&" válido e fora de aspas!
+                        if !current_part.trim().is_empty() {
+                            parts.push(current_part.clone());
+                        }
+                        current_part.clear(); // Limpa o buffer para o próximo comando
+                        chars.next(); // Consome o segundo '&'
+                        continue;
+                    }
+                }
+                current_part.push(c);
+            }
+            _ => current_part.push(c),
+        }
+    }
+    // Adiciona o restinho que sobrou (o último comando da linha)
+    if !current_part.trim().is_empty() {
+        parts.push(current_part);
+    }
+    parts
+}
+
+/// Expansão de Alias em Nível de String (Nível 10.1).
+///
+/// Necessária para aliases complexos que contêm `&&` ou `|`.
+/// Em vez de expandir token a token (que acontece tarde demais),
+/// expandimos a string bruta antes do parser lógico rodar.
+///
+/// # Exemplo
+/// * Alias: `update` -> `sudo apt update && sudo apt upgrade`
+/// * Se não fizermos isso aqui, o parser lógico nunca veria o `&&` escondido.
+fn expand_alias_string(input: &str, aliases: &HashMap<String, String>) -> String {
+    let trimmed = input.trim_start();
+    
+    // Acha onde termina a primeira palavra (o nome do comando)
+    let end_idx = trimmed.char_indices()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, _)| i)
+        .unwrap_or(trimmed.len());
+        
+    let first_word = &trimmed[..end_idx];
+    
+    if let Some(val) = aliases.get(first_word) {
+        // Se achou alias, troca a primeira palavra pelo valor completo
+        let remainder = &trimmed[end_idx..];
+        format!("{}{}", val, remainder)
+    } else {
+        input.to_string() // Se não é alias, devolve a string original
+    }
+}
+
+/// Carrega a configuração do usuário a partir de um arquivo TOML.
+///
+/// # Estratégia de Carregamento
+/// 1. Busca pela variável de ambiente `$HOME`.
+/// 2. Tenta abrir o arquivo `$HOME/.clios.toml`.
+/// 3. Se o arquivo existir e for válido, retorna a `CliosConfig` preenchida.
+/// 4. Se o arquivo não existir ou tiver erros de sintaxe, retorna `CliosConfig::default()`
+///    e imprime um aviso no stderr (se for erro de sintaxe).
+fn load_toml_config() -> CliosConfig {
+    // 1. Constrói o caminho ~/.clios.toml
+    let config_path = env::var("HOME")
+        .map(|p| Path::new(&p).join(".clios.toml"))
+        .unwrap_or_else(|_| Path::new(".clios.toml").to_path_buf());
+
+    // 2. Tenta ler e fazer o parse
+    if config_path.exists() {
+        if let Ok(mut file) = File::open(config_path) {
+            let mut contents = String::new();
+            if file.read_to_string(&mut contents).is_ok() {
+                // Tenta converter o texto TOML em Struct Rust
+                match toml::from_str::<CliosConfig>(&contents) {
+                    Ok(cfg) => return cfg, // Sucesso!
+                    Err(e) => {
+                        eprintln!("\x1b[1;33m[AVISO CONFIG]\x1b[0m Erro no .clios.toml: {}", e);
+                        eprintln!("--> Usando configuração padrão.");
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback para padrão
+    CliosConfig::default()
+}
+
+/// Constrói o prompt estilo Powerline "Costurando" os segmentos.
+//// Cada segmento é uma struct com texto, cor de fundo e cor de texto.
+///# Exemplo de Segmentos
+/// ```
+/// vec![
+///     PowerlineSegment { text: "user".to_string(), bg: "34".to_string(), fg: "15".to_string() },
+///     PowerlineSegment { text: "/home/user".to_string(), bg: "28".to_string(), fg: "15".to_string() },
+///     PowerlineSegment { text: "master".to_string(), bg: "124".to_string(), fg: "15".to_string() },
+/// ]/// ```
+fn build_powerline_prompt(segments: Vec<PowerlineSegment>) -> String {
+    let mut prompt = String::new();
+
+    // 1. Borda Redonda Inicial (O Truque)
+    if let Some(first) = segments.first() {
+        // Define a cor do TEXTO (38) igual ao FUNDO do primeiro bloco (first.bg)
+        // \u{e0b6} é o caractere de semicírculo
+        prompt.push_str(&format!("\x1b[38;5;{}m\u{e0b6}", first.bg)); 
+    }
+    
+    for (i, segment) in segments.iter().enumerate() {
+        // Desenha o bloco
+        prompt.push_str(&format!("\x1b[48;5;{}m\x1b[38;5;{}m {} ", segment.bg, segment.fg, segment.text));
+
+        // Lógica do Triângulo de conexão
+        let next_bg = if i + 1 < segments.len() {
+            format!("\x1b[48;5;{}m", segments[i+1].bg)
+        } else {
+            "\x1b[0m".to_string() // Fundo transparente no final
+        };
+
+        let current_bg_as_fg = format!("\x1b[38;5;{}m", segment.bg);
+        
+        // Se for o último segmento, podemos usar um acabamento redondo também (\u{e0b4})
+        // ou manter o triângulo vazio. Vamos manter o triângulo por enquanto.
+        prompt.push_str(&format!("{}{}\u{e0b0}", next_bg, current_bg_as_fg));
+    }
+
+    // Adiciona reset de cor e espaço
+    prompt.push_str("\x1b[0m");
+    prompt
+}
+
+/// Gera os segmentos do Powerline com base no estado atual da Shell.
+/// Cada segmento é uma struct com texto, cor de fundo e cor de texto.
+/// 1. Ícone do SO + Usuário
+/// 2. Diretório Atual
+/// 3. Git Branch
+/// 4. Contexto de Linguagem
+/// 5. Relógio
+fn get_powerline_segments(_shell: &CliosShell) -> Vec<PowerlineSegment> {
+    let mut segments = Vec::new();
+
+    // 1. Ícone do SO + Usuário (Rosa - Cor 218)
+    // Dica: Use "whoami" ou variável de ambiente. Aqui fixei para teste.
+    let user = std::env::var("USER").unwrap_or("clios".to_string());
+    segments.push(PowerlineSegment {
+        text: format!("🐧 {}", user), // Troque a maçã por 🐧 se for Linux
+        bg: "218".to_string(), // Rosa pastel
+        fg: "0".to_string(),   // Preto
+    });
+
+    // 2. Diretório Atual (Laranja - Cor 215)
+    if let Ok(path) = std::env::current_dir() {
+        let path_str = path.display().to_string();
+        // Truque para encurtar o home
+        let home = std::env::var("HOME").unwrap_or_default();
+        let short_path = path_str.replace(&home, "~"); // Troca /home/user por ~
+        
+        segments.push(PowerlineSegment {
+            text: short_path,
+            bg: "215".to_string(), // Laranja
+            fg: "0".to_string(),
+        });
+    }
+
+    // 3. Git Branch (Amarelo - Cor 229)
+    if let Some(branch) = get_git_branch() {
+        segments.push(PowerlineSegment {
+            text: format!(" {}", branch), // Ícone de branch
+            bg: "229".to_string(), // Amarelo claro
+            fg: "0".to_string(),
+        });
+    }
+
+    // 4. Contexto de Linguagem (Verde - Cor 150)
+    // Reutilizando sua lógica do Nível 15, mas agora retornando segmento
+    // 4. Contexto de Linguagem (Atualizado)
+    // 4. Sistema Genérico de Linguagens
+    // Em vez de if/else infinitos, definimos regras:
+    struct LangRule {
+        file: &'static str,      // Arquivo gatilho
+        icon: &'static str,      // Ícone
+        color: String,           // Cor de fundo
+        get_ver: fn() -> Option<String>, // Função para ler versão
+    }
+
+    // A lista de linguagens suportadas
+    let languages = [
+        LangRule { file: "Cargo.toml", icon: "", color: "150".to_string(), get_ver: get_rust_version },
+        LangRule { file: "package.json", icon: "⬢", color: "150".to_string(), get_ver: get_node_version },
+        LangRule { file: "pyproject.toml", icon: "", color: "220".to_string(), get_ver: get_python_version }, // Amarelo/Dourado
+        // Quer adicionar Go? É só adicionar essa linha:
+        // LangRule { file: "go.mod", icon: "🐹", color: "75".to_string(), get_ver: || None }, 
+    ];
+
+    // O Loop que verifica tudo sozinho
+    let mut found_lang = false;
+    for lang in languages.iter() {
+        if std::path::Path::new(lang.file).exists() {
+            let version = (lang.get_ver)().unwrap_or_else(|| "".to_string());
+            
+            segments.push(PowerlineSegment {
+                text: format!("{} {}", lang.icon, version).trim().to_string(),
+                bg: lang.color.clone(),
+                fg: "0".to_string(),
+            });
+            found_lang = true;
+            break; // Achou uma, para (prioridade). Se quiser mostrar várias, remove o break.
+        }
+    }
+
+    // Se não achou pyproject.toml mas tem arquivos python soltos
+    if !found_lang && (std::path::Path::new("requirements.txt").exists() || std::path::Path::new("main.py").exists()) {
+         segments.push(PowerlineSegment {
+            text: "🐍 Py".to_string(),
+            bg: "220".to_string(),
+            fg: "0".to_string(),
+        });
+    }
+
+    // 5. Relógio (Azul - Cor 117)
+    let time = Local::now().format("%H:%M").to_string();
+    segments.push(PowerlineSegment {
+        text: format!("🕑 {}", time),
+        bg: "117".to_string(),
+        fg: "0".to_string(),
+    });
+
+    segments
+}
+
+/// Tenta ler a versão do arquivo Cargo.toml
+fn get_rust_version() -> Option<String> {
+    let content = fs::read_to_string("Cargo.toml").ok()?; // Lê o arquivo ou desiste
+    let cargo: CargoToml = toml::from_str(&content).ok()?; // Faz o parse ou desiste
+    Some(format!("v{}", cargo.package.version))
+}
+
+/// Tenta ler a versão do arquivo package.json
+fn get_node_version() -> Option<String> {
+    let content = fs::read_to_string("package.json").ok()?;
+    let pkg: PackageJson = serde_json::from_str(&content).ok()?;
+    Some(format!("v{}", pkg.version))
+}
+
+/// Lê versão do Python (pyproject.toml)
+fn get_python_version() -> Option<String> {
+    let content = fs::read_to_string("pyproject.toml").ok()?;
+    let py: PyProjectToml = toml::from_str(&content).ok()?;
+
+    // Tenta achar no padrão oficial [project]
+    if let Some(proj) = py.project {
+        if let Some(v) = proj.version {
+            return Some(format!("v{}", v));
+        }
+    }
+    
+    // Se não achar, tenta no Poetry [tool.poetry]
+    if let Some(tool) = py.tool {
+        if let Some(poetry) = tool.poetry {
+             if let Some(v) = poetry.version {
+                return Some(format!("v{}", v));
+            }
+        }
+    }
+
+    None
+}
