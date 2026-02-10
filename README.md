@@ -1,204 +1,163 @@
-# Clios Shell 
+# Clios Shell
 
-> A Hybrid Rust + Rhai System Shell for Embedded Linux & Power Users.
+## A Modern, Scriptable System Shell in Rust
 
-**Clios** (Command Line Interface & Operating System Shell) é uma shell moderna, escrita em Rust, projetada para ser leve, rápida e extensível via scripts. Ela combina a performance de sistemas nativos com a flexibilidade da linguagem de script [Rhai](https://rhai.rs).
+**Clios** (Command Line Interface & Operating System Shell) is a modern, extensible system shell written in **Rust**, designed with a strong focus on reliability, performance, and explicit control over system behavior. It targets Linux environments, including embedded and SBC-based systems, and prioritizes correctness, debuggability, and low-level understanding over abstraction-heavy automation.
 
-![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)
-![Rhai](https://img.shields.io/badge/scripting-Rhai-brightgreen.svg)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Tests](https://img.shields.io/badge/tests-45_passing-brightgreen.svg)
-![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)
-
-##  Funcionalidades (The 10 Levels)
-
-O desenvolvimento do Clios seguiu um roadmap de 10 níveis de complexidade de sistemas operacionais:
-
-- [x] **Execução de Comandos:** Roda binários do sistema (`ls`, `grep`, `git`).
-- [x] **Histórico Persistente:** Salva comandos em `~/.clios_history`.
-- [x] **Sintaxe Colorida:** Realce de sintaxe em tempo real (Verde = Válido, Vermelho = Inválido).
-- [x] **Job Control:** Suporte a background (`&`), `Ctrl+Z` e comando `fg`.
-- [x] **Scripting Avançado:** Integração nativa com a linguagem Rhai.
-- [x] **Lógica Condicional:** Suporte a operadores `&&` e `||`.
-- [x] **Git Aware:** Prompt mostra a branch atual automaticamente.
-- [x] **I/O Redirection:** Suporte a `>` (overwrite), `>>` (append) e `2>` (stderr).
-- [x] **Pipes:** Encanamento de processos via memória (`|`).
-- [x] **Context Awareness:** Parser inteligente que respeita aspas em argumentos.
-- [x] ** Proteções Robustas:** Sistema avançado de detecção e prevenção de erros.
-
-##  Proteções e Melhorias (v0.7.0)
-
-A shell Clios inclui proteções avançadas contra erros comuns:
-
--  **Proteção contra Aliases Recursivos:** Detecta e previne loops infinitos (limite: 10 níveis)
--  **Parser Inteligente de Pipes:** Respeita aspas ao dividir comandos em pipeline
--  **Validação de Comandos Vazios:** Ignora silenciosamente entradas vazias
--  **Tratamento de Subshells:** Erros claros para `$()` mal-formados
--  **Validação de Redirecionamento:** Mensagens claras quando arquivos não podem ser abertos
--  **Verificação de Plugins:** Validação completa ao carregar arquivos `.rhai`
--  **Mensagens de Erro Padronizadas:** Sistema consistente com códigos de erro Unix
-
-##  Comandos Internos (Builtins)
-
-| Comando | Descrição |
-|---------|-----------|
-| `cd [dir]` | Mudar diretório (cd - para anterior) |
-| `pwd` | Exibir diretório atual |
-| `alias [name='cmd']` | Criar/listar aliases |
-| `unalias <name>` | Remover alias |
-| `export VAR=val` | Definir variável de ambiente |
-| `unset VAR` | Remover variável de ambiente |
-| `source <file>` | Carregar plugin Rhai |
-| `plugins` | Listar plugins carregados |
-| `rhai [código]` | Executar código Rhai |
-| `history` | Exibir histórico |
-| `type <cmd>` | Mostrar tipo do comando |
-| `fg <PID>` | Trazer processo para foreground |
-| `version` | Exibir versão |
-| `help` | Exibir ajuda completa |
-| `exit` | Sair da shell |
-
-##  Instalação
-
-### Método Rápido (Recomendado)
-
-```bash
-# Clone o repositório
-git clone https://github.com/pedrohusky/clios-shell
-cd clios-shell
-
-# Execute o instalador
-./scripts/install.sh
-```
-
-O script de instalação irá:
-1.  Compilar o Clios em modo Release (otimizado)
-2.  Instalar as configurações em `~/.cliosrc`
-3.  Instalar 3 plugins Rhai em `~/.clios_plugins/`
-4.  Instalar 4 scripts utilitários em `~/.clios_scripts/`
-5.  Opcionalmente instalar o binário em `/usr/local/bin/`
-
-### Pré-requisitos
-- **Rust (Cargo)** - [Instale aqui](https://rustup.rs)
-- **Linux ou WSL** (macOS também suportado)
-
-### Instalação Manual
-
-```bash
-# Clone o repositório
-git clone https://github.com/pedrohusky/clios-shell
-cd clios-shell
-
-# Compile em modo Release
-cargo build --release
-
-# Copie as configurações
-cp config/cliosrc ~/.cliosrc
-cp -r config/plugins ~/.clios_plugins
-cp -r config/scripts ~/.clios_scripts
-
-# (Opcional) Instale globalmente
-sudo install target/release/clios-shell /usr/local/bin/clios
-```
-
-##  Estrutura de Configuração
-
-```
-~/.cliosrc              # Configuração principal (aliases, variáveis, plugins)
-~/.clios_plugins/       # Plugins Rhai
-├── utils.rhai          # Funções utilitárias (upper, lower, sum, avg, etc.)
-├── git_helpers.rhai    # Helpers para Git (commit_msg, branch_name, etc.)
-└── dev_tools.rhai      # Ferramentas de dev (rust_fn, http_codes, etc.)
-~/.clios_scripts/       # Scripts shell utilitários
-├── sysinfo.sh          # Informações do sistema
-├── backup.sh           # Backup de arquivos
-├── cleanup.sh          # Limpeza de cache/logs
-└── gitstat.sh          # Estatísticas Git
-```
-
-##  Testes
-
-A shell Clios possui uma suite completa de testes:
-
-```bash
-# Testes automatizados (26 testes de integração)
-./test_shell.sh
-
-# Testes unitários Rust (19 testes)
-cargo test
-
-# Compilar em modo release
-cargo build --release
-```
-
-**Resultados Atuais:**
--  26/26 testes de integração passaram (100%)
--  19/19 testes unitários Rust passaram (100%)
--  45 testes totais
--  0 crashes detectados
--  Compilação sem erros ou warnings
-
-##  Plugins Rhai
-
-O Clios suporta plugins escritos em [Rhai](https://rhai.rs). As funções dos plugins ficam disponíveis diretamente no comando `rhai`:
-
-```bash
-# Carregar um plugin
-source ~/.clios_plugins/utils.rhai
-
-# Usar funções do plugin
-rhai upper("hello")          # → "HELLO"
-rhai sum([1, 2, 3, 4, 5])    # → 15
-rhai http_codes()            # → Tabela de códigos HTTP
-rhai git_cheatsheet()        # → Comandos Git úteis
-```
-
-### Plugins Incluídos
-
-| Plugin | Funções Disponíveis |
-|--------|---------------------|
-| **utils.rhai** | `upper()`, `lower()`, `capitalize()`, `sum()`, `avg()`, `factorial()`, `reverse_array()`, `unique()` |
-| **git_helpers.rhai** | `commit_msg()`, `commit_types()`, `branch_name()`, `git_cheatsheet()`, `git_flow()` |
-| **dev_tools.rhai** | `rust_fn()`, `rust_struct()`, `rust_test()`, `http_status()`, `http_codes()`, `lorem()` |
-
-##  Scripts Utilitários
-
-Scripts shell prontos para uso via aliases:
-
-```bash
-# Informações do sistema
-sysinfo
-
-# Backup de diretório
-backup ~/Documents
-
-# Limpeza de cache/logs
-cleanup
-
-# Estatísticas Git do repositório
-gitstat
-```
--  Compilação sem erros ou warnings
-
-##  Documentação
-
-- **[GUIA_DEPURACAO.md](GUIA_DEPURACAO.md)** - Guia completo com comandos de teste manual
-- **[RELATORIO_MELHORIAS.md](RELATORIO_MELHORIAS.md)** - Relatório detalhado de todas as melhorias
-- **[test_shell.sh](test_shell.sh)** - Script de testes automatizado
-
-##  Uso Rápido
-
-```bash
-# Modo interativo
-./target/debug/clios-shell
-
-# Executar comando único
-./target/debug/clios-shell -c "echo Hello World"
-
-# Executar script
-./target/debug/clios-shell script.sh
-```
+The project explores how a traditional Unix-like shell can be rethought using modern systems programming practices, while remaining compatible with existing command-line workflows.
 
 ---
 
-**Status:**  Pronto para produção | **Versão:** 1.0 Final Release | **Testes:** 100% passando
+## Project Scope and Motivation
+
+Clios was created as a **systems engineering project and technical study**, not as a commercial product or AI-driven shell. Its main goals are:
+
+* Study shell internals such as parsing, job control, process management, and I/O redirection
+* Apply Rust to low-level, stateful, interactive software
+* Design a shell architecture that is **explicit, testable, and extensible**
+* Explore scripting integration without sacrificing system safety
+
+While Clios is stable and usable, it should be understood as a **Proof of Concept (PoC)** and an evolving technical project.
+
+---
+
+## Core Design Principles
+
+* **Correctness over convenience** – predictable behavior and clear error messages
+* **Explicit system interaction** – minimal hidden magic
+* **Extensibility by design** – scripting via an embedded language
+* **Compatibility** – works with standard Unix tools and workflows
+
+---
+
+## Key Features
+
+* Execution of external system commands (`ls`, `grep`, `git`, etc.)
+* Persistent command history stored in `~/.clios_history`
+* Real-time syntax feedback (valid / invalid commands)
+* Job control with background execution, `Ctrl+Z`, and `fg`
+* Native scripting support using the **Rhai** embedded language
+* Logical operators `&&` and `||`
+* Git-aware prompt displaying the current branch
+* I/O redirection: `>`, `>>`, `2>`
+* Process pipelines using memory-based piping (`|`)
+* Context-aware parser that correctly handles quoted arguments
+
+---
+
+## Safety Mechanisms and Error Handling
+
+Clios includes explicit protections against common shell failure modes:
+
+* Detection and prevention of recursive alias loops (depth limit enforced)
+* Pipeline parsing that respects quoted segments
+* Graceful handling of empty or malformed commands
+* Clear error reporting for invalid subshell usage
+* Validation of redirection targets and file access
+* Plugin validation before execution
+* Consistent, Unix-inspired error messages
+
+These mechanisms are intended both for robustness and for learning how real shells defend against misuse.
+
+---
+
+## Built-in Commands
+
+| Command              | Description                         |
+| -------------------- | ----------------------------------- |
+| `cd [dir]`           | Change directory (`cd -` supported) |
+| `pwd`                | Print working directory             |
+| `alias [name='cmd']` | Create or list aliases              |
+| `unalias <name>`     | Remove alias                        |
+| `export VAR=val`     | Set environment variable            |
+| `unset VAR`          | Remove environment variable         |
+| `source <file>`      | Load Rhai plugin                    |
+| `plugins`            | List loaded plugins                 |
+| `rhai [code]`        | Execute Rhai code                   |
+| `history`            | Show command history                |
+| `type <cmd>`         | Show command type                   |
+| `fg <PID>`           | Resume job in foreground            |
+| `version`            | Display version information         |
+| `help`               | Display help                        |
+| `exit`               | Exit the shell                      |
+
+---
+
+## Installation
+
+### Recommended Method
+
+```bash
+git clone https://github.com/pedrohusky/clios-shell
+cd clios-shell
+./scripts/install.sh
+```
+
+The installer:
+
+1. Builds the shell in release mode
+2. Installs configuration files in `~/.cliosrc`
+3. Installs example Rhai plugins in `~/.clios_plugins/`
+4. Installs utility scripts in `~/.clios_scripts/`
+5. Optionally installs the binary system-wide
+
+### Requirements
+
+* Rust (Cargo)
+* Linux or WSL (macOS partially supported)
+
+---
+
+## Configuration Structure
+
+```
+~/.cliosrc
+~/.clios_plugins/
+~/.clios_scripts/
+```
+
+Plugins and scripts are intentionally simple and transparent, serving both as utilities and as examples for extension.
+
+---
+
+## Testing and Validation
+
+Clios includes automated testing at multiple levels:
+
+* Integration tests for interactive shell behavior
+* Unit tests for core Rust components
+
+```bash
+./test_shell.sh
+cargo test
+```
+
+All tests currently pass, and no known crashes are present in normal usage scenarios.
+
+---
+
+## Project Status
+
+* **Status:** Stable for advanced usage and experimentation
+* **Nature:** Technical study / Proof of Concept
+* **Target audience:** Systems programming students, embedded Linux users, and low-level software enthusiasts
+
+The project is actively evolving and intentionally conservative in scope. Features are only added when their behavior can be clearly specified and tested.
+
+---
+
+## Non-Goals
+
+To keep the project focused, Clios intentionally does **not** aim to:
+
+* Replace existing shells like Bash or Zsh
+* Abstract away Unix concepts
+* Provide AI-driven automation in its core
+
+Experiments with local AI models were conducted separately and are **not** part of the current codebase.
+
+---
+
+## License
+
+MIT License
