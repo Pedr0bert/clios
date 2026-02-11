@@ -158,7 +158,7 @@ pub fn get_powerline_segments(_config: &CliosConfig) -> Vec<PowerlineSegment> {
     // 3. Git Branch (Amarelo - Cor 229)
     if let Some(branch) = get_git_branch() {
         segments.push(PowerlineSegment {
-            text: format!(" {}", branch), // Ícone de branch
+            text: format!(" {}", branch), // Ícone de branch
             bg: "229".to_string(),         // Amarelo claro
             fg: "0".to_string(),
         });
