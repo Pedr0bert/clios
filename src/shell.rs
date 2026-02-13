@@ -332,7 +332,7 @@ impl CliosShell {
 
             // 3. Executa como programa externo
             if background {
-                execute_job_control(tokens, true);
+                execute_job_control(tokens, true, &jobs_ref);
                 0
             } else {
                 execute_pipeline(vec![tokens])

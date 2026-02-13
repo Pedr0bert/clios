@@ -136,9 +136,12 @@ pub fn list_jobs(jobs: &JobList) {
 /// 3. **Pai & Filho:** Ambos tentam setar o `setpgid` (para evitar race conditions).
 /// 4. **Pai:** Dá o terminal pro filho (`tcsetpgrp`) e espera (`waitpid`).
 /// 5. **Pai:** Quando o filho morre/para, pega o terminal de volta.
-pub fn execute_job_control(tokens: Vec<String>, background: bool) {
+pub fn execute_job_control(tokens: Vec<String>, background: bool, jobs: &JobList) {
     // Segurança: Ignorar SIGTTOU na shell
     unsafe { signal::signal(Signal::SIGTTOU, SigHandler::SigIgn) }.unwrap();
+
+    // Guarda o comando original para registro
+    let command = tokens.join(" ");
 
     match unsafe { unistd::fork() } {
         Ok(unistd::ForkResult::Parent { child, .. }) => {
@@ -163,6 +166,8 @@ pub fn execute_job_control(tokens: Vec<String>, background: bool) {
                 let shell_pgid = unistd::getpid();
                 let _ = unistd::tcsetpgrp(std::io::stdin(), shell_pgid);
             } else {
+                // Adiciona job à lista
+                add_job(jobs, child.as_raw(), command.clone());
                 println!("[Background Job {}]", child);
             }
         }
