@@ -157,6 +157,12 @@ To keep the project focused, Clios intentionally does **not** aim to:
 Experiments with local AI models were conducted separately and are **not** part of the current codebase.
 
 ---
+## Demo
+
+![Clios Demo](assets/example1.gif)
+![Clios Demo](assets/example2.gif)
+
+---
 
 ## License
 
