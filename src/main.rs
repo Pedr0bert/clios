@@ -22,25 +22,14 @@
 //! ```
 
 // --- MODULE DECLARATIONS ---
-mod builtins;
-mod completion;
-mod config;
-mod expansion;
-mod jobs;
-mod pipeline;
-mod prompt;
-mod rhai_integration;
-mod shell;
-
-#[cfg(test)]
-mod tests;
+// Moved to lib.rs
 
 // --- IMPORTS ---
-use completion::CliosHelper;
-use config::{get_color_ansi, load_toml_config};
-use prompt::{build_powerline_prompt, get_git_branch, get_powerline_segments};
-use rhai_integration::run_rhai_script;
-use shell::CliosShell;
+use clios_shell::completion::CliosHelper;
+use clios_shell::config::{get_color_ansi, load_toml_config};
+use clios_shell::prompt::{build_powerline_prompt, get_git_branch, get_powerline_segments};
+use clios_shell::rhai_integration::run_rhai_script;
+use clios_shell::shell::CliosShell;
 
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
