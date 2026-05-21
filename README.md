@@ -88,7 +88,7 @@ These mechanisms are intended both for robustness and for learning how real shel
 ### Recommended Method
 
 ```bash
-git clone https://github.com/pedrohusky/clios-shell
+git clone https://github.com/Pedr0bert/clios
 cd clios-shell
 ./scripts/install.sh
 ```
